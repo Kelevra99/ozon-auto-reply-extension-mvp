@@ -256,10 +256,19 @@ async function buildReviewExternalId(fields: {
 }
 
 function extractDomContext(modal: HTMLElement): Record<string, unknown> {
-  const text = normalizeText(modal.innerText);
-  const article = text.match(/Артикул:\s*([^\n]+)/i)?.[1]?.trim() ?? null;
-  const orderNumber = text.match(/Номер заказа:\s*([^\n]+)/i)?.[1]?.trim() ?? null;
-  const productRating = text.match(/Рейтинг товара:\s*([0-9]+(?:[.,][0-9]+)?)/i)?.[1]?.replace(',', '.') ?? null;
+  const article =
+    cleanTextCandidate(findValueByLabel(modal, 'Артикул'))?.replace(/^Артикул:\s*/i, '') ?? null;
+
+  const orderNumber =
+    cleanTextCandidate(findValueByLabel(modal, 'Номер заказа'))?.replace(/^Номер заказа:\s*/i, '') ?? null;
+
+  const productRatingRaw =
+    cleanTextCandidate(findValueByLabel(modal, 'Рейтинг товара')) ??
+    cleanTextCandidate(textOf(modal.querySelector('div')));
+
+  const productRating =
+    productRatingRaw?.match(/([0-9]+(?:[.,][0-9]+)?)/)?.[1]?.replace(',', '.') ?? null;
+
   const productUrl = modal.querySelector<HTMLAnchorElement>('a[href*="/product/"]')?.href ?? null;
 
   const labels = unique(

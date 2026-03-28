@@ -106,6 +106,18 @@ function findValueByLabel(root: HTMLElement, label: string): string | null {
   return null;
 }
 
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findValueByInlineLabel(root: HTMLElement, label: string): string | null {
+  const rawText = root.innerText ?? '';
+  const escaped = escapeRegExp(label);
+  const match = rawText.match(new RegExp(`${escaped}:\\s*([^\\n\\r]+)`, 'i'));
+  return cleanTextCandidate(match?.[1] ?? null);
+}
+
 function pickProductName(modal: HTMLElement): string | null {
   const linkText = cleanTextCandidate(textOf(modal.querySelector('a[href*="/product/"] div, a[href*="/product/"]')));
   if (linkText) return linkText;
@@ -256,19 +268,10 @@ async function buildReviewExternalId(fields: {
 }
 
 function extractDomContext(modal: HTMLElement): Record<string, unknown> {
-  const article =
-    cleanTextCandidate(findValueByLabel(modal, 'Артикул'))?.replace(/^Артикул:\s*/i, '') ?? null;
-
-  const orderNumber =
-    cleanTextCandidate(findValueByLabel(modal, 'Номер заказа'))?.replace(/^Номер заказа:\s*/i, '') ?? null;
-
-  const productRatingRaw =
-    cleanTextCandidate(findValueByLabel(modal, 'Рейтинг товара')) ??
-    cleanTextCandidate(textOf(modal.querySelector('div')));
-
-  const productRating =
-    productRatingRaw?.match(/([0-9]+(?:[.,][0-9]+)?)/)?.[1]?.replace(',', '.') ?? null;
-
+  const article = findValueByInlineLabel(modal, 'Артикул');
+  const orderNumber = findValueByInlineLabel(modal, 'Номер заказа');
+  const productRatingRaw = findValueByInlineLabel(modal, 'Рейтинг товара');
+  const productRating = productRatingRaw?.match(/([0-9]+(?:[.,][0-9]+)?)/)?.[1]?.replace(',', '.') ?? null;
   const productUrl = modal.querySelector<HTMLAnchorElement>('a[href*="/product/"]')?.href ?? null;
 
   const labels = unique(

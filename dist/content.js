@@ -77,6 +77,15 @@ function findValueByLabel(root, label) {
   }
   return null;
 }
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function findValueByInlineLabel(root, label) {
+  const rawText = root.innerText ?? "";
+  const escaped = escapeRegExp(label);
+  const match = rawText.match(new RegExp(`${escaped}:\\s*([^\\n\\r]+)`, "i"));
+  return cleanTextCandidate(match?.[1] ?? null);
+}
 function pickProductName(modal) {
   const linkText = cleanTextCandidate(textOf(modal.querySelector('a[href*="/product/"] div, a[href*="/product/"]')));
   if (linkText) return linkText;
@@ -183,10 +192,10 @@ async function buildReviewExternalId(fields) {
   return `ozon::${product}::${author}::${date}::${hash}`;
 }
 function extractDomContext(modal) {
-  const text = normalizeText(modal.innerText);
-  const article = text.match(/Артикул:\s*([^\n]+)/i)?.[1]?.trim() ?? null;
-  const orderNumber = text.match(/Номер заказа:\s*([^\n]+)/i)?.[1]?.trim() ?? null;
-  const productRating = text.match(/Рейтинг товара:\s*([0-9]+(?:[.,][0-9]+)?)/i)?.[1]?.replace(",", ".") ?? null;
+  const article = findValueByInlineLabel(modal, "\u0410\u0440\u0442\u0438\u043A\u0443\u043B");
+  const orderNumber = findValueByInlineLabel(modal, "\u041D\u043E\u043C\u0435\u0440 \u0437\u0430\u043A\u0430\u0437\u0430");
+  const productRatingRaw = findValueByInlineLabel(modal, "\u0420\u0435\u0439\u0442\u0438\u043D\u0433 \u0442\u043E\u0432\u0430\u0440\u0430");
+  const productRating = productRatingRaw?.match(/([0-9]+(?:[.,][0-9]+)?)/)?.[1]?.replace(",", ".") ?? null;
   const productUrl = modal.querySelector('a[href*="/product/"]')?.href ?? null;
   const labels = unique(
     Array.from(modal.querySelectorAll("button, span, a, div")).map((el) => cleanTextCandidate(textOf(el))).filter((value) => Boolean(value)).filter((value) => value.length <= 80).slice(0, 30)

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "OZON Auto Reply Extension MVP",
+  "version": "0.1.0",
+  "description": "Generates and inserts seller replies for OZON reviews using a local backend.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://localhost:3001/*",
+    "http://127.0.0.1:3001/*",
+    "https://seller.ozon.ru/*",
+    "https://*.ozon.ru/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "OZON Auto Reply",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://seller.ozon.ru/*",
+        "https://*.seller.ozon.ru/*",
+        "https://*.ozon.ru/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

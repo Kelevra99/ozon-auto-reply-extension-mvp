@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OZON Auto Reply</title>
+    <style>
+      body {
+        margin: 0;
+        min-width: 360px;
+        font-family: Inter, system-ui, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      .wrap {
+        padding: 16px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      label {
+        font-size: 12px;
+        color: #cbd5e1;
+      }
+      input,
+      select {
+        border: 1px solid #334155;
+        border-radius: 10px;
+        background: #111827;
+        color: #f8fafc;
+        padding: 10px 12px;
+        font-size: 14px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.primary {
+        background: #2563eb;
+        color: white;
+      }
+      button.secondary {
+        background: #1e293b;
+        color: white;
+        border: 1px solid #334155;
+      }
+      .status {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #111827;
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+      }
+      .status.success {
+        border: 1px solid #14532d;
+        color: #bbf7d0;
+      }
+      .status.error {
+        border: 1px solid #7f1d1d;
+        color: #fecaca;
+      }
+      .hint {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      code {
+        color: #93c5fd;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>OZON Auto Reply</h1>
+
+      <div class="field">
+        <label for="backendBaseUrl">Backend URL</label>
+        <input id="backendBaseUrl" type="text" placeholder="http://localhost:3001" />
+      </div>
+
+      <div class="field">
+        <label for="apiKey">API-ключ</label>
+        <input id="apiKey" type="password" placeholder="sk_user_..." />
+      </div>
+
+      <div class="field">
+        <label for="mode">Режим</label>
+        <select id="mode">
+          <option value="standard">standard</option>
+          <option value="advanced">advanced</option>
+          <option value="expert">expert</option>
+        </select>
+      </div>
+
+      <div class="actions">
+        <button id="saveButton" class="primary">Сохранить</button>
+        <button id="checkButton" class="secondary">Проверить соединение</button>
+      </div>
+
+      <div id="status" class="status">Введите backend URL и API-ключ.</div>
+      <div class="hint">Данные хранятся в <code>chrome.storage.local</code>.</div>
+    </div>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "ozon-auto-reply-extension-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome Extension MVP for generating and inserting OZON Seller review replies via local backend.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "clean": "rm -rf dist",
+    "dev": "node scripts/build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.3",
+    "typescript": "^5.8.3"
+  }
+}

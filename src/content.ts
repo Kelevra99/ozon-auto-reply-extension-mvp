@@ -10,6 +10,7 @@ import {
 import type {
   BackgroundRequest,
   BackgroundResponse,
+  ExtensionSettings,
   ExtractedReview,
   GenerateReplyResponse,
   ReplyResultPayload
@@ -43,6 +44,70 @@ const autoState = {
   statusText: 'Автоответ выключен.',
   statusTone: 'default' as 'default' | 'success' | 'error' | 'warn'
 };
+
+const HIDDEN_NATIVE_AI_ATTR = 'data-ozon-auto-reply-hidden';
+const OZON_UI_ROOT_CLASS = 'ozon-auto-reply-root';
+const OZON_UI_STYLES_ID = 'ozon-auto-reply-styles';
+let extensionEnabled = true;
+
+function cleanupInjectedUi() {
+  if (scanTimer !== null) {
+    window.clearTimeout(scanTimer);
+    scanTimer = null;
+  }
+
+  document.querySelectorAll<HTMLElement>(`.${OZON_UI_ROOT_CLASS}`).forEach((root) => {
+    root.remove();
+  });
+
+  document.getElementById(AUTO_ROOT_ID)?.remove();
+  document.getElementById(AUTO_STYLES_ID)?.remove();
+  document.getElementById(OZON_UI_STYLES_ID)?.remove();
+
+  document.querySelectorAll<HTMLElement>(`[${HIDDEN_NATIVE_AI_ATTR}="true"]`).forEach((element) => {
+    element.style.display = '';
+    element.style.visibility = '';
+    element.style.pointerEvents = '';
+    element.style.height = '';
+    element.style.minHeight = '';
+    element.style.margin = '';
+    element.style.padding = '';
+    element.style.overflow = '';
+    element.removeAttribute(HIDDEN_NATIVE_AI_ATTR);
+  });
+}
+
+function runExtensionUiBoot() {
+  if (!extensionEnabled) return;
+
+  void bindCards();
+  window.setTimeout(() => void bindCards(), 300);
+  window.setTimeout(() => void bindCards(), 1000);
+  window.setTimeout(() => ensureAutoControls(), 300);
+  window.setTimeout(() => ensureAutoControls(), 1000);
+  void initAutoMode();
+}
+
+async function applyExtensionEnabledState(enabled: boolean) {
+  extensionEnabled = enabled;
+
+  if (!enabled) {
+    if (autoState.enabled || autoState.running) {
+      await stopAutoMode('Расширение выключено.');
+    } else {
+      autoState.enabled = false;
+      autoState.stopRequested = true;
+      autoState.running = false;
+      updateAutoControls();
+    }
+
+    cleanupInjectedUi();
+    return;
+  }
+
+  autoState.stopRequested = false;
+  runExtensionUiBoot();
+}
 
 function getRuntime() {
   const runtime = globalThis.chrome?.runtime;
@@ -106,6 +171,8 @@ function isElementVisible(element: HTMLElement | null | undefined): element is H
 }
 
 function scheduleScan() {
+  if (!extensionEnabled) return;
+
   if (scanTimer !== null) {
     window.clearTimeout(scanTimer);
   }
@@ -146,6 +213,10 @@ async function reportResult(payload: ReplyResultPayload) {
 async function generateAndInsertForCard(card: HTMLElement, root: HTMLElement): Promise<void> {
   let review: ExtractedReview | null = null;
 
+  if (!extensionEnabled) {
+    throw new Error('Расширение выключено.');
+  }
+
   try {
     setBusy(root, true);
     root.dataset.processing = 'true';
@@ -155,7 +226,7 @@ async function generateAndInsertForCard(card: HTMLElement, root: HTMLElement): P
     review = await extractReview(card);
 
     updateStatus(root, 'Генерация ответа...');
-    const settings = await sendMessage<{ backendBaseUrl: string; apiKey: string; mode: 'standard' | 'advanced' | 'expert' }>({
+    const settings = await sendMessage<ExtensionSettings>({
       type: 'GET_SETTINGS'
     });
 
@@ -209,6 +280,8 @@ async function generateAndInsertForCard(card: HTMLElement, root: HTMLElement): P
 }
 
 function bindCard(card: HTMLElement) {
+  if (!extensionEnabled) return;
+
   const signature = getReviewSignature(card);
   const root = mountUiRoot(card, signature);
   const generateButton = root.querySelector<HTMLButtonElement>('[data-role="generate"]');
@@ -245,7 +318,7 @@ function bindCard(card: HTMLElement) {
 }
 
 async function bindCards() {
-  if (!isReviewPage()) return;
+  if (!extensionEnabled || !isReviewPage()) return;
 
   const cards = findReviewCards();
   for (const card of cards) {
@@ -380,7 +453,7 @@ function findHeaderMount(): HTMLElement | null {
 }
 
 function ensureAutoControls() {
-  if (!isReviewPage()) return;
+  if (!extensionEnabled || !isReviewPage()) return;
 
   ensureAutoStyles();
 
@@ -914,6 +987,11 @@ const replyAppeared = await waitUntil(() => {
 }
 
 async function startAutoMode() {
+  if (!extensionEnabled) {
+    setAutoStatus('Расширение выключено.', 'warn');
+    return;
+  }
+
   if (autoState.running) return;
 
   autoState.enabled = true;
@@ -947,7 +1025,7 @@ async function runAutoModeLoop() {
   try {
     await ensureWaitingFilterActive();
 
-    while (autoState.enabled && !autoState.stopRequested) {
+    while (extensionEnabled && autoState.enabled && !autoState.stopRequested) {
       ensureAutoControls();
 
       if (hasModalOpen()) {
@@ -1014,7 +1092,7 @@ async function runAutoModeLoop() {
 }
 
 async function initAutoMode() {
-  if (!isReviewPage()) return;
+  if (!extensionEnabled || !isReviewPage()) return;
 
   ensureAutoControls();
 
@@ -1031,10 +1109,26 @@ async function initAutoMode() {
   }, 1400);
 }
 
-void bindCards();
-window.setTimeout(() => void bindCards(), 300);
-window.setTimeout(() => void bindCards(), 1000);
-window.setTimeout(() => ensureAutoControls(), 300);
-window.setTimeout(() => ensureAutoControls(), 1000);
-initObserver();
-void initAutoMode();
+async function init() {
+  initObserver();
+
+  try {
+    const settings = await sendMessage<ExtensionSettings>({ type: 'GET_SETTINGS' });
+    await applyExtensionEnabledState(settings.enabled ?? true);
+  } catch (error) {
+    console.warn('[Finerox Auto Reply] failed to load extension state', error);
+    extensionEnabled = true;
+    runExtensionUiBoot();
+  }
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, 'enabled')) {
+      return;
+    }
+
+    const nextValue = changes.enabled?.newValue;
+    void applyExtensionEnabledState(typeof nextValue === 'boolean' ? nextValue : true);
+  });
+}
+
+void init();

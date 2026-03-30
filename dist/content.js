@@ -505,6 +505,59 @@ var autoState = {
   statusText: "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.",
   statusTone: "default"
 };
+var HIDDEN_NATIVE_AI_ATTR2 = "data-ozon-auto-reply-hidden";
+var OZON_UI_ROOT_CLASS = "ozon-auto-reply-root";
+var OZON_UI_STYLES_ID = "ozon-auto-reply-styles";
+var extensionEnabled = true;
+function cleanupInjectedUi() {
+  if (scanTimer !== null) {
+    window.clearTimeout(scanTimer);
+    scanTimer = null;
+  }
+  document.querySelectorAll(`.${OZON_UI_ROOT_CLASS}`).forEach((root) => {
+    root.remove();
+  });
+  document.getElementById(AUTO_ROOT_ID)?.remove();
+  document.getElementById(AUTO_STYLES_ID)?.remove();
+  document.getElementById(OZON_UI_STYLES_ID)?.remove();
+  document.querySelectorAll(`[${HIDDEN_NATIVE_AI_ATTR2}="true"]`).forEach((element) => {
+    element.style.display = "";
+    element.style.visibility = "";
+    element.style.pointerEvents = "";
+    element.style.height = "";
+    element.style.minHeight = "";
+    element.style.margin = "";
+    element.style.padding = "";
+    element.style.overflow = "";
+    element.removeAttribute(HIDDEN_NATIVE_AI_ATTR2);
+  });
+}
+function runExtensionUiBoot() {
+  if (!extensionEnabled) return;
+  void bindCards();
+  window.setTimeout(() => void bindCards(), 300);
+  window.setTimeout(() => void bindCards(), 1e3);
+  window.setTimeout(() => ensureAutoControls(), 300);
+  window.setTimeout(() => ensureAutoControls(), 1e3);
+  void initAutoMode();
+}
+async function applyExtensionEnabledState(enabled) {
+  extensionEnabled = enabled;
+  if (!enabled) {
+    if (autoState.enabled || autoState.running) {
+      await stopAutoMode("\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.");
+    } else {
+      autoState.enabled = false;
+      autoState.stopRequested = true;
+      autoState.running = false;
+      updateAutoControls();
+    }
+    cleanupInjectedUi();
+    return;
+  }
+  autoState.stopRequested = false;
+  runExtensionUiBoot();
+}
 function getRuntime() {
   const runtime = globalThis.chrome?.runtime;
   if (!runtime?.sendMessage) {
@@ -554,6 +607,7 @@ function isElementVisible2(element) {
   return rect.width > 0 && rect.height > 0;
 }
 function scheduleScan() {
+  if (!extensionEnabled) return;
   if (scanTimer !== null) {
     window.clearTimeout(scanTimer);
   }
@@ -588,6 +642,9 @@ async function reportResult(payload) {
 }
 async function generateAndInsertForCard(card, root) {
   let review = null;
+  if (!extensionEnabled) {
+    throw new Error("\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.");
+  }
   try {
     setBusy(root, true);
     root.dataset.processing = "true";
@@ -640,6 +697,7 @@ async function generateAndInsertForCard(card, root) {
   }
 }
 function bindCard(card) {
+  if (!extensionEnabled) return;
   const signature = getReviewSignature(card);
   const root = mountUiRoot(card, signature);
   const generateButton = root.querySelector('[data-role="generate"]');
@@ -668,7 +726,7 @@ function bindCard(card) {
   }
 }
 async function bindCards() {
-  if (!isReviewPage()) return;
+  if (!extensionEnabled || !isReviewPage()) return;
   const cards = findReviewCards();
   for (const card of cards) {
     const signature = getReviewSignature(card);
@@ -783,7 +841,7 @@ function findHeaderMount() {
   return button.closest(".cs580-a5") ?? button.parentElement?.parentElement?.parentElement ?? null;
 }
 function ensureAutoControls() {
-  if (!isReviewPage()) return;
+  if (!extensionEnabled || !isReviewPage()) return;
   ensureAutoStyles();
   const mount = findHeaderMount();
   if (!mount) return;
@@ -1181,6 +1239,10 @@ async function processCandidate(candidate) {
   return true;
 }
 async function startAutoMode() {
+  if (!extensionEnabled) {
+    setAutoStatus("\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.", "warn");
+    return;
+  }
   if (autoState.running) return;
   autoState.enabled = true;
   autoState.stopRequested = false;
@@ -1206,7 +1268,7 @@ async function runAutoModeLoop() {
   updateAutoControls();
   try {
     await ensureWaitingFilterActive();
-    while (autoState.enabled && !autoState.stopRequested) {
+    while (extensionEnabled && autoState.enabled && !autoState.stopRequested) {
       ensureAutoControls();
       if (hasModalOpen()) {
         setAutoStatus("\u0416\u0434\u0443 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0435\u0433\u043E \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u043E\u043A\u043D\u0430...");
@@ -1260,7 +1322,7 @@ async function runAutoModeLoop() {
   }
 }
 async function initAutoMode() {
-  if (!isReviewPage()) return;
+  if (!extensionEnabled || !isReviewPage()) return;
   ensureAutoControls();
   const enabled = await getPersistentAutoModeEnabled();
   if (!enabled) return;
@@ -1272,11 +1334,23 @@ async function initAutoMode() {
     void runAutoModeLoop();
   }, 1400);
 }
-void bindCards();
-window.setTimeout(() => void bindCards(), 300);
-window.setTimeout(() => void bindCards(), 1e3);
-window.setTimeout(() => ensureAutoControls(), 300);
-window.setTimeout(() => ensureAutoControls(), 1e3);
-initObserver();
-void initAutoMode();
+async function init() {
+  initObserver();
+  try {
+    const settings = await sendMessage({ type: "GET_SETTINGS" });
+    await applyExtensionEnabledState(settings.enabled ?? true);
+  } catch (error) {
+    console.warn("[Finerox Auto Reply] failed to load extension state", error);
+    extensionEnabled = true;
+    runExtensionUiBoot();
+  }
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !Object.prototype.hasOwnProperty.call(changes, "enabled")) {
+      return;
+    }
+    const nextValue = changes.enabled?.newValue;
+    void applyExtensionEnabledState(typeof nextValue === "boolean" ? nextValue : true);
+  });
+}
+void init();
 //# sourceMappingURL=content.js.map

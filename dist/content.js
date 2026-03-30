@@ -490,12 +490,68 @@ function mountUiRoot(card, reviewSignature) {
 var scanDebounceMs = 180;
 var scanTimer = null;
 var processedCards = /* @__PURE__ */ new WeakMap();
+var AUTO_MODE_STORAGE_KEY = "fineroxAutoReplyEnabled";
+var AUTO_ROOT_ID = "finerox-auto-runner";
+var AUTO_STYLES_ID = "finerox-auto-runner-styles";
+var triedTitlesInCycle = /* @__PURE__ */ new Set();
+var autoState = {
+  enabled: false,
+  running: false,
+  stopRequested: false,
+  batchTarget: randomInt(10, 15),
+  processedInBatch: 0,
+  totalProcessed: 0,
+  refreshedWithoutWork: false,
+  statusText: "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.",
+  statusTone: "default"
+};
+function getRuntime() {
+  const runtime = globalThis.chrome?.runtime;
+  if (!runtime?.sendMessage) {
+    throw new Error("\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E. \u041E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443 OZON \u043F\u043E\u0441\u043B\u0435 \u043F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F.");
+  }
+  return runtime;
+}
 async function sendMessage(message) {
-  const response = await chrome.runtime.sendMessage(message);
+  const runtime = getRuntime();
+  const response = await runtime.sendMessage(message);
   if (!response?.ok) {
     throw new Error(response?.error || "\u041E\u0448\u0438\u0431\u043A\u0430 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F");
   }
   return response.data;
+}
+function normalizeText2(value) {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+function truncate(value, max = 60) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}\u2026`;
+}
+function randomInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+async function sleepRange(minMs, maxMs) {
+  await sleep(randomInt(minMs, maxMs));
+}
+async function waitUntil(check, timeoutMs = 5e3, intervalMs = 120) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (check()) return true;
+    await sleep(intervalMs);
+  }
+  return false;
+}
+function isElementVisible2(element) {
+  if (!element) return false;
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+    return false;
+  }
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
 }
 function scheduleScan() {
   if (scanTimer !== null) {
@@ -504,6 +560,7 @@ function scheduleScan() {
   scanTimer = window.setTimeout(() => {
     scanTimer = null;
     void bindCards();
+    ensureAutoControls();
   }, scanDebounceMs);
 }
 function updateStatus(root, text, tone = "default") {
@@ -526,7 +583,7 @@ async function reportResult(payload) {
   try {
     await sendMessage({ type: "REPORT_RESULT", payload });
   } catch (error) {
-    console.warn("[OZON Auto Reply] Failed to report result", error);
+    console.warn("[Finerox Auto Reply] Failed to report result", error);
   }
 }
 async function generateAndInsertForCard(card, root) {
@@ -538,7 +595,9 @@ async function generateAndInsertForCard(card, root) {
     updateMeta(root, "");
     review = await extractReview(card);
     updateStatus(root, "\u0413\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u044F \u043E\u0442\u0432\u0435\u0442\u0430...");
-    const settings = await sendMessage({ type: "GET_SETTINGS" });
+    const settings = await sendMessage({
+      type: "GET_SETTINGS"
+    });
     const result = await sendMessage({
       type: "GENERATE_REPLY",
       payload: {
@@ -574,6 +633,7 @@ async function generateAndInsertForCard(card, root) {
         errorText: message
       });
     }
+    throw error;
   } finally {
     root.dataset.processing = "false";
     setBusy(root, false);
@@ -586,23 +646,26 @@ function bindCard(card) {
   if (!generateButton) return;
   processedCards.set(card, signature);
   root.dataset.reviewSignature = signature;
-  generateButton.onclick = async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (root.dataset.processing === "true" || generateButton.dataset.busy === "true") {
-      return;
-    }
-    generateButton.dataset.busy = "true";
-    generateButton.disabled = true;
-    try {
-      await generateAndInsertForCard(card, root);
-    } catch (error) {
-      console.error("[OZON Auto Reply] generate click failed", error);
-    } finally {
-      generateButton.dataset.busy = "false";
-      generateButton.disabled = false;
-    }
-  };
+  if (root.dataset.handlersBound !== "true") {
+    generateButton.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (root.dataset.processing === "true" || generateButton.dataset.busy === "true") {
+        return;
+      }
+      generateButton.dataset.busy = "true";
+      generateButton.disabled = true;
+      try {
+        await generateAndInsertForCard(card, root);
+      } catch (error) {
+        console.error("[Finerox Auto Reply] generate click failed", error);
+      } finally {
+        generateButton.dataset.busy = "false";
+        generateButton.disabled = false;
+      }
+    });
+    root.dataset.handlersBound = "true";
+  }
 }
 async function bindCards() {
   if (!isReviewPage()) return;
@@ -646,8 +709,574 @@ function initObserver() {
     true
   );
 }
+function setAutoStatus(text, tone = "default") {
+  autoState.statusText = text;
+  autoState.statusTone = tone;
+  updateAutoControls();
+}
+async function getPersistentAutoModeEnabled() {
+  const data = await chrome.storage.local.get(AUTO_MODE_STORAGE_KEY);
+  return Boolean(data[AUTO_MODE_STORAGE_KEY]);
+}
+async function setPersistentAutoModeEnabled(value) {
+  await chrome.storage.local.set({ [AUTO_MODE_STORAGE_KEY]: value });
+}
+function ensureAutoStyles() {
+  if (document.getElementById(AUTO_STYLES_ID)) return;
+  const style = document.createElement("style");
+  style.id = AUTO_STYLES_ID;
+  style.textContent = `
+    #${AUTO_ROOT_ID} {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: 12px;
+      flex-wrap: wrap;
+    }
+
+    .finerox-auto-btn {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      background: #005bff;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .finerox-auto-btn.stop {
+      background: #c62828;
+    }
+
+    .finerox-auto-status {
+      font-size: 13px;
+      line-height: 1.35;
+      color: #5b6575;
+      max-width: 520px;
+    }
+
+    .finerox-auto-status.success {
+      color: #047857;
+    }
+
+    .finerox-auto-status.error {
+      color: #b91c1c;
+    }
+
+    .finerox-auto-status.warn {
+      color: #b45309;
+    }
+  `;
+  document.head.appendChild(style);
+}
+function findHeaderMount() {
+  const byId = document.getElementById("download-report-ai");
+  if (byId) {
+    return byId.closest(".cs580-a5") ?? byId.parentElement?.parentElement?.parentElement ?? null;
+  }
+  const button = Array.from(document.querySelectorAll("button")).find(
+    (element) => normalizeText2(element.innerText) === "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043E\u0442\u0447\u0451\u0442" || normalizeText2(element.innerText) === "\u0421\u043A\u0430\u0447\u0430\u0442\u044C \u043E\u0442\u0447\u0435\u0442"
+  );
+  if (!button) return null;
+  return button.closest(".cs580-a5") ?? button.parentElement?.parentElement?.parentElement ?? null;
+}
+function ensureAutoControls() {
+  if (!isReviewPage()) return;
+  ensureAutoStyles();
+  const mount = findHeaderMount();
+  if (!mount) return;
+  let root = document.getElementById(AUTO_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = AUTO_ROOT_ID;
+    root.innerHTML = `
+      <button type="button" class="finerox-auto-btn" data-role="toggle">\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442</button>
+      <div class="finerox-auto-status" data-role="status">\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.</div>
+    `;
+    const toggleButton = root.querySelector('[data-role="toggle"]');
+    toggleButton?.addEventListener("click", () => {
+      if (autoState.enabled) {
+        void stopAutoMode("\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D \u0432\u0440\u0443\u0447\u043D\u0443\u044E.");
+      } else {
+        void startAutoMode();
+      }
+    });
+  }
+  if (root.parentElement !== mount) {
+    mount.append(root);
+  }
+  updateAutoControls();
+}
+function updateAutoControls() {
+  const root = document.getElementById(AUTO_ROOT_ID);
+  if (!root) return;
+  const toggleButton = root.querySelector('[data-role="toggle"]');
+  const status = root.querySelector('[data-role="status"]');
+  if (toggleButton) {
+    toggleButton.textContent = autoState.enabled ? "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442" : "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442";
+    toggleButton.classList.toggle("stop", autoState.enabled);
+  }
+  if (status) {
+    status.textContent = autoState.statusText;
+    status.className = "finerox-auto-status";
+    if (autoState.statusTone !== "default") {
+      status.classList.add(autoState.statusTone);
+    }
+  }
+}
+function findWaitingFilterButton() {
+  return document.querySelector('button[data-active="true"] span.s3c80-b5')?.closest("button") ?? Array.from(document.querySelectorAll("button")).find(
+    (button) => normalizeText2(button.innerText) === "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"
+  ) ?? null;
+}
+function isWaitingFilterActive(button) {
+  return button?.dataset.active === "true";
+}
+async function clickElement(element) {
+  element.scrollIntoView({ block: "center", behavior: "smooth" });
+  await sleepRange(180, 420);
+  element.click();
+}
+async function ensureWaitingFilterActive() {
+  const filterButton = findWaitingFilterButton();
+  if (!filterButton) {
+    throw new Error('\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u043A\u043D\u043E\u043F\u043A\u0430 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+  }
+  if (isWaitingFilterActive(filterButton)) {
+    return;
+  }
+  setAutoStatus('\u0412\u043A\u043B\u044E\u0447\u0430\u044E \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"...');
+  await clickElement(filterButton);
+  const activated = await waitUntil(() => {
+    const current = findWaitingFilterButton();
+    return Boolean(current && isWaitingFilterActive(current));
+  }, 7e3, 140);
+  if (!activated) {
+    throw new Error('\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+  }
+  await sleepRange(700, 1300);
+}
+async function refreshWaitingFilter() {
+  const filterButton = findWaitingFilterButton();
+  if (!filterButton) {
+    throw new Error('\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u043A\u043D\u043E\u043F\u043A\u0430 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+  }
+  setAutoStatus("\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u044E \u0441\u043F\u0438\u0441\u043E\u043A \u043E\u0442\u0437\u044B\u0432\u043E\u0432...");
+  if (isWaitingFilterActive(filterButton)) {
+    await clickElement(filterButton);
+    await waitUntil(() => {
+      const current = findWaitingFilterButton();
+      return Boolean(current && !isWaitingFilterActive(current));
+    }, 5e3, 140);
+    await sleepRange(700, 1300);
+  }
+  const nextFilterButton = findWaitingFilterButton();
+  if (!nextFilterButton) {
+    throw new Error('\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E \u043D\u0430\u0439\u0442\u0438 \u043A\u043D\u043E\u043F\u043A\u0443 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+  }
+  await clickElement(nextFilterButton);
+  const activated = await waitUntil(() => {
+    const current = findWaitingFilterButton();
+    return Boolean(current && isWaitingFilterActive(current));
+  }, 7e3, 140);
+  if (!activated) {
+    throw new Error('\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+  }
+  triedTitlesInCycle.clear();
+  autoState.processedInBatch = 0;
+  autoState.batchTarget = randomInt(10, 15);
+  autoState.refreshedWithoutWork = false;
+  await sleepRange(1200, 2200);
+}
+function getRowStatus(row) {
+  const text = normalizeText2(row.innerText);
+  if (text.includes("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D")) return "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D";
+  if (text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D")) return "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D";
+  if (text.includes("\u041D\u043E\u0432\u044B\u0439")) return "\u041D\u043E\u0432\u044B\u0439";
+  return null;
+}
+function findCandidateRowRoot(titleNode) {
+  const directRow = titleNode.closest("tr");
+  if (directRow) return directRow;
+  let current = titleNode.parentElement;
+  while (current && current !== document.body) {
+    const text = normalizeText2(current.innerText);
+    if (text.includes("\u041D\u043E\u0432\u044B\u0439") || text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D") || text.includes("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D")) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+function getVisiblePendingCandidates() {
+  const titleNodes = Array.from(document.querySelectorAll("div.n1d-ba8[title]")).filter(isElementVisible2);
+  const usedRows = /* @__PURE__ */ new Set();
+  const candidates = [];
+  for (const titleNode of titleNodes) {
+    const row = findCandidateRowRoot(titleNode);
+    if (!row || usedRows.has(row)) continue;
+    const status = getRowStatus(row);
+    if (status !== "\u041D\u043E\u0432\u044B\u0439" && status !== "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D") continue;
+    const title = normalizeText2(titleNode.getAttribute("title") || titleNode.textContent);
+    if (!title) continue;
+    const clickTarget = titleNode.closest(".n1d-b8a") ?? titleNode;
+    if (!isElementVisible2(clickTarget)) continue;
+    usedRows.add(row);
+    candidates.push({ row, clickTarget, title, status });
+  }
+  return candidates;
+}
+function pickNextCandidate() {
+  const candidates = getVisiblePendingCandidates().filter((candidate) => !triedTitlesInCycle.has(candidate.title));
+  return candidates[0] ?? null;
+}
+function getOpenReviewModal() {
+  const cards = findReviewCards();
+  return cards[0] ?? null;
+}
+function hasModalOpen() {
+  return Boolean(getOpenReviewModal());
+}
+function isModalFullyLoaded(modal) {
+  const reviewText = normalizeText2(extractCommentTextFromModal(modal));
+  const input = findReplyInput(modal);
+  return Boolean(reviewText && input);
+}
+function extractCommentTextFromModal(modal) {
+  const rows = Array.from(modal.querySelectorAll(".n1d-l7"));
+  for (const row of rows) {
+    const text = normalizeText2(row.innerText);
+    if (!text.includes("\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439")) continue;
+    const body = row.querySelector(".n1d-m");
+    const value = normalizeText2(body?.innerText ?? "");
+    const cleaned = value.replace(/^Комментарий\s*/i, "").trim();
+    if (cleaned) return cleaned;
+  }
+  const raw = normalizeText2(modal.innerText);
+  const match = raw.match(/Комментарий\s+(.+?)\s+Оценки/si);
+  return normalizeText2(match?.[1] ?? null) || null;
+}
+async function openCandidate(candidate) {
+  if (hasModalOpen()) {
+    throw new Error("\u041F\u0440\u0435\u0434\u044B\u0434\u0443\u0449\u0435\u0435 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u0435\u0449\u0451 \u043D\u0435 \u0437\u0430\u043A\u0440\u044B\u0442\u043E");
+  }
+  setAutoStatus(`\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u044E \u043E\u0442\u0437\u044B\u0432: ${truncate(candidate.title, 56)}...`);
+  triedTitlesInCycle.add(candidate.title);
+  await clickElement(candidate.clickTarget);
+  const opened = await waitUntil(() => Boolean(getOpenReviewModal()), 7e3, 120);
+  if (!opened) {
+    throw new Error("\u041D\u0435 \u043E\u0442\u043A\u0440\u044B\u043B\u043E\u0441\u044C \u043E\u043A\u043D\u043E \u043E\u0442\u0437\u044B\u0432\u0430");
+  }
+  await sleepRange(2e3, 3e3);
+  const modal = getOpenReviewModal();
+  if (!modal) {
+    throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u043F\u043E\u0441\u043B\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F");
+  }
+  const ready = await waitUntil(() => {
+    const currentModal = getOpenReviewModal();
+    if (!currentModal) return false;
+    return isModalFullyLoaded(currentModal);
+  }, 5e3, 150);
+  if (!ready) {
+    throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043E\u0442\u043A\u0440\u044B\u043B\u043E\u0441\u044C \u043D\u0435 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E");
+  }
+  const readyModal = getOpenReviewModal();
+  if (!readyModal) {
+    throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043F\u0440\u043E\u043F\u0430\u043B\u043E \u043F\u043E\u0441\u043B\u0435 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438");
+  }
+  return readyModal;
+}
+function findSendReplyButton(modal) {
+  const textarea = modal.querySelector("#AnswerCommentForm");
+  const allButtons = Array.from(modal.querySelectorAll('button[type="submit"]')).filter(isElementVisible2);
+  const disallowedTexts = ["\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C", "\u041E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u043D\u0430 \u043E\u0442\u0437\u044B\u0432", "\u041D\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u0432 \u0447\u0430\u0442", "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C", "\u0423\u0434\u0430\u043B\u0438\u0442\u044C", "\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C"];
+  const candidates = allButtons.filter((button) => {
+    const text = normalizeText2(button.innerText);
+    return !disallowedTexts.some((part) => text.includes(part));
+  });
+  if (!textarea) {
+    return candidates[0] ?? null;
+  }
+  const textareaRect = textarea.getBoundingClientRect();
+  const nearest = candidates.map((button) => ({ button, rect: button.getBoundingClientRect() })).filter(({ rect }) => rect.top >= textareaRect.top - 20 && rect.top <= textareaRect.bottom + 220).sort((a, b) => {
+    const scoreA = Math.abs(a.rect.top - textareaRect.bottom) + Math.abs(a.rect.left - textareaRect.right);
+    const scoreB = Math.abs(b.rect.top - textareaRect.bottom) + Math.abs(b.rect.left - textareaRect.right);
+    return scoreA - scoreB;
+  });
+  return nearest[0]?.button ?? candidates[candidates.length - 1] ?? null;
+}
+function findPostedSellerReplyBlock(modal) {
+  const blocks = Array.from(modal.querySelectorAll("div.n1d-p4")).filter(isElementVisible2);
+  for (const block of blocks) {
+    const text = normalizeText2(block.innerText);
+    const hasDelete = text.includes("\u0423\u0434\u0430\u043B\u0438\u0442\u044C");
+    const hasEdit = text.includes("\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C");
+    const hasSellerReply = text.includes("\u041E\u0444\u0438\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0439 \u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u0438\u0442\u0435\u043B\u044C \u043F\u0440\u043E\u0434\u0430\u0432\u0446\u0430") || /ответ\s+/i.test(text) || text.includes("\u041D\u0430 \u043C\u043E\u0434\u0435\u0440\u0430\u0446\u0438\u0438");
+    if ((hasDelete || hasEdit) && hasSellerReply) {
+      return block;
+    }
+  }
+  return null;
+}
+function hasPostedSellerReply(modal, expectedReply) {
+  const block = findPostedSellerReplyBlock(modal);
+  if (!block) return false;
+  if (!expectedReply) return true;
+  const blockText = normalizeText2(block.innerText);
+  const expectedSample = normalizeText2(expectedReply).slice(0, 80);
+  return !expectedSample || blockText.includes(expectedSample);
+}
+function findCloseModalButton(modal) {
+  const exact = modal.parentElement?.querySelector("button.t7c80-a1.sc180-b5");
+  if (exact && isElementVisible2(exact)) {
+    return exact;
+  }
+  const allButtons = Array.from(
+    (modal.parentElement ?? document).querySelectorAll('button[type="button"]')
+  ).filter(isElementVisible2);
+  return allButtons.find((button) => {
+    const text = normalizeText2(button.innerText);
+    if (text) return false;
+    return button.querySelector("svg") !== null;
+  }) ?? null;
+}
+function fireRealClick(target) {
+  const common = { bubbles: true, cancelable: true, composed: true, view: window };
+  try {
+    target.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        ...common,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: 1
+      })
+    );
+  } catch {
+  }
+  target.dispatchEvent(
+    new MouseEvent("mousedown", {
+      ...common,
+      button: 0,
+      buttons: 1
+    })
+  );
+  try {
+    target.dispatchEvent(
+      new PointerEvent("pointerup", {
+        ...common,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: 0
+      })
+    );
+  } catch {
+  }
+  target.dispatchEvent(
+    new MouseEvent("mouseup", {
+      ...common,
+      button: 0,
+      buttons: 0
+    })
+  );
+  target.dispatchEvent(
+    new MouseEvent("click", {
+      ...common,
+      button: 0,
+      buttons: 0
+    })
+  );
+  if (target instanceof HTMLElement) {
+    target.click();
+  }
+}
+function findModalBackdrop(modal) {
+  const root = modal.parentElement ?? modal;
+  const rightBackdrop = root.querySelector(".tc280-a1.tc280-a3") ?? root.querySelector(".tc280-a1.tc280-a2");
+  if (rightBackdrop && isElementVisible2(rightBackdrop)) {
+    return rightBackdrop;
+  }
+  return null;
+}
+async function closeOpenModalStrictly() {
+  const modal = getOpenReviewModal();
+  if (!modal) return;
+  const closeButton = findCloseModalButton(modal);
+  if (!closeButton) {
+    throw new Error("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u043A\u043D\u043E\u043F\u043A\u0430 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u044F \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u043E\u043A\u043D\u0430");
+  }
+  setAutoStatus("\u0417\u0430\u043A\u0440\u044B\u0432\u0430\u044E \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E...");
+  fireRealClick(closeButton);
+  let closed = await waitUntil(() => !getOpenReviewModal(), 1500, 150);
+  if (closed) {
+    await sleep(1e3);
+    return;
+  }
+  const closeSvg = closeButton.querySelector("svg");
+  if (closeSvg) {
+    fireRealClick(closeSvg);
+    closed = await waitUntil(() => !getOpenReviewModal(), 1500, 150);
+    if (closed) {
+      await sleep(1e3);
+      return;
+    }
+  }
+  const currentModal = getOpenReviewModal();
+  if (currentModal) {
+    const backdrop = findModalBackdrop(currentModal);
+    if (backdrop) {
+      fireRealClick(backdrop);
+      closed = await waitUntil(() => !getOpenReviewModal(), 2500, 150);
+      if (closed) {
+        await sleep(1e3);
+        return;
+      }
+    }
+  }
+  throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0438 \u043F\u043E \u043A\u0440\u0435\u0441\u0442\u0438\u043A\u0443, \u043D\u0438 \u043F\u043E \u0444\u043E\u043D\u0443");
+}
+async function recoverByReload(reason) {
+  setAutoStatus(`${reason}. \u041F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u044E \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443...`, "warn");
+  await setPersistentAutoModeEnabled(true);
+  await sleepRange(900, 1600);
+  window.location.reload();
+  throw new Error(reason);
+}
+async function processCandidate(candidate) {
+  const modal = await openCandidate(candidate);
+  const review = await extractReview(modal);
+  const input = findReplyInput(modal);
+  if (!normalizeText2(review.reviewText) || !input) {
+    await recoverByReload("\u041E\u0442\u0437\u044B\u0432 \u043E\u0442\u043A\u0440\u044B\u043B\u0441\u044F \u043D\u0435 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E");
+  }
+  const root = mountUiRoot(modal, getReviewSignature(modal));
+  await generateAndInsertForCard(modal, root);
+  const actualInput = findReplyInput(modal);
+  const insertedText = actualInput instanceof HTMLTextAreaElement || actualInput instanceof HTMLInputElement ? normalizeText2(actualInput.value) : normalizeText2(root.dataset.generatedReply);
+  if (!insertedText) {
+    throw new Error("\u041E\u0442\u0432\u0435\u0442 \u043D\u0435 \u0432\u0441\u0442\u0430\u0432\u0438\u043B\u0441\u044F \u0432 \u043F\u043E\u043B\u0435");
+  }
+  await sleepRange(400, 900);
+  const sendButton = findSendReplyButton(modal);
+  if (!sendButton) {
+    throw new Error("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u043A\u043D\u043E\u043F\u043A\u0430 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438 \u043E\u0442\u0432\u0435\u0442\u0430");
+  }
+  setAutoStatus(`\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u043E\u0442\u0432\u0435\u0442: ${truncate(candidate.title, 50)}...`);
+  await clickElement(sendButton);
+  await sleepRange(2e3, 3e3);
+  const replyAppeared = await waitUntil(() => {
+    const currentModal = getOpenReviewModal();
+    if (!currentModal) return false;
+    return hasPostedSellerReply(currentModal, insertedText);
+  }, 2e4, 2e3);
+  if (!replyAppeared) {
+    throw new Error("\u041F\u043E\u0441\u043B\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438 \u0432 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u043C \u043E\u043A\u043D\u0435 \u043D\u0435 \u043F\u043E\u044F\u0432\u0438\u043B\u0441\u044F \u043E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043E\u0442\u0432\u0435\u0442");
+  }
+  setAutoStatus(`\u041E\u0442\u0432\u0435\u0442 \u043F\u043E\u044F\u0432\u0438\u043B\u0441\u044F: ${truncate(candidate.title, 50)}. \u0417\u0430\u043A\u0440\u044B\u0432\u0430\u044E \u043E\u043A\u043D\u043E...`, "success");
+  await sleep(1e3);
+  await closeOpenModalStrictly();
+  return true;
+}
+async function startAutoMode() {
+  if (autoState.running) return;
+  autoState.enabled = true;
+  autoState.stopRequested = false;
+  autoState.batchTarget = randomInt(10, 15);
+  autoState.processedInBatch = 0;
+  autoState.refreshedWithoutWork = false;
+  triedTitlesInCycle.clear();
+  await setPersistentAutoModeEnabled(true);
+  setAutoStatus("\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0437\u0430\u043F\u0443\u0449\u0435\u043D.");
+  updateAutoControls();
+  void runAutoModeLoop();
+}
+async function stopAutoMode(reason = "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.") {
+  autoState.enabled = false;
+  autoState.stopRequested = true;
+  await setPersistentAutoModeEnabled(false);
+  setAutoStatus(reason);
+  updateAutoControls();
+}
+async function runAutoModeLoop() {
+  if (autoState.running) return;
+  autoState.running = true;
+  updateAutoControls();
+  try {
+    await ensureWaitingFilterActive();
+    while (autoState.enabled && !autoState.stopRequested) {
+      ensureAutoControls();
+      if (hasModalOpen()) {
+        setAutoStatus("\u0416\u0434\u0443 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0435\u0433\u043E \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u043E\u043A\u043D\u0430...");
+        const closed = await waitUntil(() => !hasModalOpen(), 8e3, 150);
+        if (!closed) {
+          throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0435 \u0437\u0430\u043A\u0440\u044B\u043B\u043E\u0441\u044C \u0432\u043E\u0432\u0440\u0435\u043C\u044F");
+        }
+        await sleep(1e3);
+      }
+      if (autoState.processedInBatch >= autoState.batchTarget) {
+        await refreshWaitingFilter();
+      }
+      const candidate = pickNextCandidate();
+      if (!candidate) {
+        if (autoState.refreshedWithoutWork) {
+          await stopAutoMode("\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0438\u0435 \u043E\u0442\u0437\u044B\u0432\u044B \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B.");
+          break;
+        }
+        autoState.refreshedWithoutWork = true;
+        await refreshWaitingFilter();
+        continue;
+      }
+      autoState.refreshedWithoutWork = false;
+      try {
+        const success = await processCandidate(candidate);
+        if (success) {
+          autoState.totalProcessed += 1;
+          autoState.processedInBatch += 1;
+          setAutoStatus(
+            `\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u043E ${autoState.totalProcessed}. \u0412 \u0442\u0435\u043A\u0443\u0449\u0435\u043C \u0446\u0438\u043A\u043B\u0435 ${autoState.processedInBatch}/${autoState.batchTarget}.`,
+            "success"
+          );
+          await sleep(1e3);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442\u0430";
+        setAutoStatus(message, "error");
+        if (hasModalOpen()) {
+          try {
+            await closeOpenModalStrictly();
+          } catch (closeError) {
+            console.warn("[Finerox Auto Reply] failed to close modal after error", closeError);
+          }
+        }
+        await sleepRange(1200, 2200);
+      }
+    }
+  } finally {
+    autoState.running = false;
+    updateAutoControls();
+  }
+}
+async function initAutoMode() {
+  if (!isReviewPage()) return;
+  ensureAutoControls();
+  const enabled = await getPersistentAutoModeEnabled();
+  if (!enabled) return;
+  autoState.enabled = true;
+  autoState.stopRequested = false;
+  setAutoStatus("\u0412\u043E\u0441\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u044E \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043F\u043E\u0441\u043B\u0435 \u043F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438...");
+  updateAutoControls();
+  window.setTimeout(() => {
+    void runAutoModeLoop();
+  }, 1400);
+}
 void bindCards();
 window.setTimeout(() => void bindCards(), 300);
 window.setTimeout(() => void bindCards(), 1e3);
+window.setTimeout(() => ensureAutoControls(), 300);
+window.setTimeout(() => ensureAutoControls(), 1e3);
 initObserver();
+void initAutoMode();
 //# sourceMappingURL=content.js.map

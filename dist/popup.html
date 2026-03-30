@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OZON Auto Reply</title>
+    <title>Finerox</title>
     <style>
       body {
         margin: 0;
@@ -15,9 +15,86 @@
       .wrap {
         padding: 16px;
       }
+      .brand {
+        margin: 0 0 6px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #93c5fd;
+      }
       h1 {
-        margin: 0 0 12px;
-        font-size: 18px;
+        margin: 0 0 8px;
+        font-size: 20px;
+        line-height: 1.2;
+      }
+      .subtitle {
+        margin-bottom: 14px;
+        font-size: 13px;
+        line-height: 1.45;
+        color: #cbd5e1;
+      }
+      .toggle-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 14px;
+        padding: 12px;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        background: #111827;
+      }
+      .toggle-copy {
+        min-width: 0;
+      }
+      .toggle-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #f8fafc;
+      }
+      .toggle-hint {
+        margin-top: 4px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #94a3b8;
+      }
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 46px;
+        height: 28px;
+        flex: 0 0 auto;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        inset: 0;
+        cursor: pointer;
+        background: #334155;
+        border-radius: 999px;
+        transition: 0.2s ease;
+      }
+      .slider::before {
+        content: '';
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        left: 3px;
+        top: 3px;
+        background: white;
+        border-radius: 50%;
+        transition: 0.2s ease;
+      }
+      .switch input:checked + .slider {
+        background: #2563eb;
+      }
+      .switch input:checked + .slider::before {
+        transform: translateX(18px);
       }
       .field {
         display: grid;
@@ -28,7 +105,7 @@
         font-size: 12px;
         color: #cbd5e1;
       }
-      input,
+      input[type="password"],
       select {
         border: 1px solid #334155;
         border-radius: 10px;
@@ -61,6 +138,10 @@
         color: white;
         border: 1px solid #334155;
       }
+      button:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
       .status {
         margin-top: 12px;
         padding: 10px 12px;
@@ -78,46 +159,68 @@
         border: 1px solid #7f1d1d;
         color: #fecaca;
       }
-      .hint {
-        margin-top: 10px;
+      .footer {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
         font-size: 12px;
         color: #94a3b8;
       }
-      code {
+      a {
         color: #93c5fd;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <h1>OZON Auto Reply</h1>
+      <div class="brand">Finerox</div>
+      <h1>Автоответы для OZON</h1>
+      <div class="subtitle">Введите API-ключ, полученный на сайте finerox.online.</div>
 
-      <div class="field">
-        <label for="backendBaseUrl">Backend URL</label>
-        <input id="backendBaseUrl" type="text" placeholder="http://localhost:3001" />
+      <div class="toggle-card">
+        <div class="toggle-copy">
+          <div class="toggle-title">Расширение включено</div>
+          <div class="toggle-hint">
+            Когда выключено, Finerox не добавляет свои кнопки и не меняет страницу OZON.
+          </div>
+        </div>
+        <label class="switch" for="enabled">
+          <input id="enabled" type="checkbox" />
+          <span class="slider"></span>
+        </label>
       </div>
 
       <div class="field">
         <label for="apiKey">API-ключ</label>
-        <input id="apiKey" type="password" placeholder="sk_user_..." />
+        <input id="apiKey" type="password" placeholder="Вставьте API-ключ, полученный на сайте finerox.online" />
       </div>
 
       <div class="field">
         <label for="mode">Режим</label>
         <select id="mode">
-          <option value="standard">standard</option>
-          <option value="advanced">advanced</option>
-          <option value="expert">expert</option>
+          <option value="standard">Стандарт</option>
+          <option value="advanced">Умный</option>
+          <option value="expert">Эксперт</option>
         </select>
       </div>
 
       <div class="actions">
         <button id="saveButton" class="primary">Сохранить</button>
-        <button id="checkButton" class="secondary">Проверить соединение</button>
+        <button id="checkButton" class="secondary">Проверить</button>
       </div>
 
-      <div id="status" class="status">Введите backend URL и API-ключ.</div>
-      <div class="hint">Данные хранятся в <code>chrome.storage.local</code>.</div>
+      <div id="status" class="status">Загрузка настроек...</div>
+
+      <div class="footer">
+        <span>Сервис подключается автоматически.</span>
+        <a href="https://finerox.online" target="_blank" rel="noreferrer">finerox.online</a>
+      </div>
     </div>
 
     <script type="module" src="./popup.js"></script>

@@ -1,14 +1,14 @@
 // src/api.ts
 function ensureSettings(settings) {
-  if (!settings.backendBaseUrl) {
-    throw new Error("\u041D\u0435 \u0443\u043A\u0430\u0437\u0430\u043D backend URL");
-  }
   if (!settings.apiKey) {
-    throw new Error("\u041D\u0435 \u0443\u043A\u0430\u0437\u0430\u043D API-\u043A\u043B\u044E\u0447");
+    throw new Error("\u0423\u043A\u0430\u0436\u0438\u0442\u0435 API-\u043A\u043B\u044E\u0447, \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043D\u044B\u0439 \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 finerox.online.");
   }
 }
+function getBaseUrl(settings) {
+  return settings.backendBaseUrl.replace(/\/+$/, "");
+}
 function debugLog(stage, payload) {
-  console.info(`[OZON Auto Reply] ${stage}`, payload);
+  console.info(`[Finerox OZON Auto Reply] ${stage}`, payload);
 }
 async function parseError(response) {
   try {
@@ -53,38 +53,38 @@ async function postJson(url, options) {
 }
 async function checkConnection(settings) {
   ensureSettings(settings);
-  return postJson(`${settings.backendBaseUrl}/v1/extension/auth/check`, {
+  const baseUrl = getBaseUrl(settings);
+  return postJson(`${baseUrl}/v1/extension/auth/check`, {
     apiKey: settings.apiKey,
     body: {}
   });
 }
 async function generateReply(settings, payload) {
   ensureSettings(settings);
-  return postJson(`${settings.backendBaseUrl}/v1/replies/generate`, {
+  const baseUrl = getBaseUrl(settings);
+  return postJson(`${baseUrl}/v1/replies/generate`, {
     apiKey: settings.apiKey,
     body: payload
   });
 }
 async function reportReplyResult(settings, payload) {
-  if (!settings.backendBaseUrl) {
-    throw new Error("\u041D\u0435 \u0443\u043A\u0430\u0437\u0430\u043D backend URL");
-  }
-  return postJson(`${settings.backendBaseUrl}/v1/replies/result`, {
+  const baseUrl = getBaseUrl(settings);
+  return postJson(`${baseUrl}/v1/replies/result`, {
     apiKey: settings.apiKey || void 0,
     body: payload
   });
 }
 
 // src/storage.ts
+var BACKEND_BASE_URL = "https://api.finerox.online";
 var DEFAULT_SETTINGS = {
-  backendBaseUrl: "http://localhost:3001",
+  backendBaseUrl: BACKEND_BASE_URL,
   apiKey: "",
-  mode: "advanced"
+  mode: "expert",
+  enabled: true
 };
-function normalizeBaseUrl(value) {
-  const raw = (value ?? "").trim();
-  if (!raw) return DEFAULT_SETTINGS.backendBaseUrl;
-  return raw.replace(/\/+$/, "");
+function normalizeBaseUrl(_value) {
+  return BACKEND_BASE_URL;
 }
 function normalizeMode(value) {
   if (value === "standard" || value === "advanced" || value === "expert") {
@@ -92,20 +92,28 @@ function normalizeMode(value) {
   }
   return DEFAULT_SETTINGS.mode;
 }
+function normalizeEnabled(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return DEFAULT_SETTINGS.enabled;
+}
 async function getSettings() {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
   return {
     backendBaseUrl: normalizeBaseUrl(stored.backendBaseUrl),
     apiKey: typeof stored.apiKey === "string" ? stored.apiKey.trim() : "",
-    mode: normalizeMode(stored.mode)
+    mode: normalizeMode(stored.mode),
+    enabled: normalizeEnabled(stored.enabled)
   };
 }
 async function saveSettings(settings) {
   const current = await getSettings();
   const next = {
-    backendBaseUrl: normalizeBaseUrl(settings.backendBaseUrl ?? current.backendBaseUrl),
+    backendBaseUrl: BACKEND_BASE_URL,
     apiKey: typeof settings.apiKey === "string" ? settings.apiKey.trim() : current.apiKey,
-    mode: normalizeMode(settings.mode ?? current.mode)
+    mode: normalizeMode(settings.mode ?? current.mode),
+    enabled: normalizeEnabled(settings.enabled ?? current.enabled)
   };
   await chrome.storage.local.set(next);
   return next;

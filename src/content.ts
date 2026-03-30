@@ -19,11 +19,22 @@ const scanDebounceMs = 180;
 let scanTimer: number | null = null;
 const processedCards = new WeakMap<HTMLElement, string>();
 
+function getRuntime() {
+  const runtime = globalThis.chrome?.runtime;
+  if (!runtime?.sendMessage) {
+    throw new Error('Расширение недоступно. Обновите страницу OZON после установки или перезагрузки расширения.');
+  }
+  return runtime;
+}
+
 async function sendMessage<T>(message: BackgroundRequest): Promise<T> {
-  const response = (await chrome.runtime.sendMessage(message)) as BackgroundResponse<T>;
+  const runtime = getRuntime();
+  const response = (await runtime.sendMessage(message)) as BackgroundResponse<T>;
+
   if (!response?.ok) {
     throw new Error(response?.error || 'Ошибка расширения');
   }
+
   return response.data as T;
 }
 
@@ -135,7 +146,8 @@ function bindCard(card: HTMLElement) {
   processedCards.set(card, signature);
   root.dataset.reviewSignature = signature;
 
-  generateButton.onclick = async (event) => {
+if (root.dataset.handlersBound !== 'true') {
+  generateButton.addEventListener('click', async (event) => {
     event.preventDefault();
     event.stopPropagation();
 
@@ -154,7 +166,10 @@ function bindCard(card: HTMLElement) {
       generateButton.dataset.busy = 'false';
       generateButton.disabled = false;
     }
-  };
+  });
+
+  root.dataset.handlersBound = 'true';
+}
 }
 
 async function bindCards() {

@@ -720,20 +720,92 @@ function hasPostedSellerReply(modal: HTMLElement, expectedReply?: string): boole
 }
 
 function findCloseModalButton(modal: HTMLElement): HTMLButtonElement | null {
-  const container = modal.parentElement ?? modal;
-  const modalRect = modal.getBoundingClientRect();
+  const exact = modal.parentElement?.querySelector<HTMLButtonElement>('button.t7c80-a1.sc180-b5');
+  if (exact && isElementVisible(exact)) {
+    return exact;
+  }
+
+  const allButtons = Array.from(
+    (modal.parentElement ?? document).querySelectorAll<HTMLButtonElement>('button[type="button"]')
+  ).filter(isElementVisible);
 
   return (
-    Array.from(container.querySelectorAll<HTMLButtonElement>('button[type="button"]'))
-      .filter(isElementVisible)
-      .find((button) => {
-        const text = normalizeText(button.innerText);
-        if (text) return false;
-
-        const rect = button.getBoundingClientRect();
-        return rect.top <= modalRect.top + 50 && rect.left >= modalRect.right - 140;
-      }) ?? null
+    allButtons.find((button) => {
+      const text = normalizeText(button.innerText);
+      if (text) return false;
+      return button.querySelector('svg') !== null;
+    }) ?? null
   );
+}
+
+function fireRealClick(target: Element) {
+  const common = { bubbles: true, cancelable: true, composed: true, view: window };
+
+  try {
+    target.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        ...common,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: 1
+      })
+    );
+  } catch {}
+
+  target.dispatchEvent(
+    new MouseEvent('mousedown', {
+      ...common,
+      button: 0,
+      buttons: 1
+    })
+  );
+
+  try {
+    target.dispatchEvent(
+      new PointerEvent('pointerup', {
+        ...common,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: 0
+      })
+    );
+  } catch {}
+
+  target.dispatchEvent(
+    new MouseEvent('mouseup', {
+      ...common,
+      button: 0,
+      buttons: 0
+    })
+  );
+
+  target.dispatchEvent(
+    new MouseEvent('click', {
+      ...common,
+      button: 0,
+      buttons: 0
+    })
+  );
+
+  if (target instanceof HTMLElement) {
+    target.click();
+  }
+}
+
+function findModalBackdrop(modal: HTMLElement): HTMLElement | null {
+  const root = modal.parentElement ?? modal;
+
+  const rightBackdrop =
+    root.querySelector<HTMLElement>('.tc280-a1.tc280-a3') ??
+    root.querySelector<HTMLElement>('.tc280-a1.tc280-a2');
+
+  if (rightBackdrop && isElementVisible(rightBackdrop)) {
+    return rightBackdrop;
+  }
+
+  return null;
 }
 
 async function closeOpenModalStrictly() {
@@ -745,19 +817,40 @@ async function closeOpenModalStrictly() {
     throw new Error('Не найдена кнопка закрытия модального окна');
   }
 
-  await clickElement(closeButton);
+  setAutoStatus('Закрываю модальное окно...');
 
-  const closed = await waitUntil(() => !getOpenReviewModal(), 6000, 120);
-  if (!closed) {
-    throw new Error('Не удалось закрыть модальное окно');
+  fireRealClick(closeButton);
+
+  let closed = await waitUntil(() => !getOpenReviewModal(), 1500, 150);
+  if (closed) {
+    await sleep(1000);
+    return;
   }
 
-  const listReady = await waitUntil(() => getVisiblePendingCandidates().length >= 0 && !hasModalOpen(), 4000, 120);
-  if (!listReady) {
-    throw new Error('Список не вернулся после закрытия модального окна');
+  const closeSvg = closeButton.querySelector('svg');
+  if (closeSvg) {
+    fireRealClick(closeSvg);
+    closed = await waitUntil(() => !getOpenReviewModal(), 1500, 150);
+    if (closed) {
+      await sleep(1000);
+      return;
+    }
   }
 
-  await sleep(1000);
+  const currentModal = getOpenReviewModal();
+  if (currentModal) {
+    const backdrop = findModalBackdrop(currentModal);
+    if (backdrop) {
+      fireRealClick(backdrop);
+      closed = await waitUntil(() => !getOpenReviewModal(), 2500, 150);
+      if (closed) {
+        await sleep(1000);
+        return;
+      }
+    }
+  }
+
+  throw new Error('Не удалось закрыть модальное окно ни по крестику, ни по фону');
 }
 
 async function recoverByReload(reason: string): Promise<never> {
@@ -802,11 +895,11 @@ async function processCandidate(candidate: ReviewRowCandidate): Promise<boolean>
 
   await sleepRange(2000, 3000);
 
-  const replyAppeared = await waitUntil(() => {
-    const currentModal = getOpenReviewModal();
-    if (!currentModal) return false;
-    return hasPostedSellerReply(currentModal, insertedText);
-  }, 15000, 200);
+ const replyAppeared = await waitUntil(() => {
+  const currentModal = getOpenReviewModal();
+  if (!currentModal) return false;
+  return hasPostedSellerReply(currentModal, insertedText);
+}, 20000, 2000);
 
   if (!replyAppeared) {
     throw new Error('После отправки в модальном окне не появился опубликованный ответ');

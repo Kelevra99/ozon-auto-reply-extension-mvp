@@ -1,15 +1,15 @@
 import type { ExtensionSettings, Mode } from './types';
 
+export const BACKEND_BASE_URL = 'https://api.finerox.online'\;
+
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  backendBaseUrl: 'http://localhost:3001',
+  backendBaseUrl: BACKEND_BASE_URL,
   apiKey: '',
-  mode: 'advanced'
+  mode: 'expert'
 };
 
-function normalizeBaseUrl(value?: string): string {
-  const raw = (value ?? '').trim();
-  if (!raw) return DEFAULT_SETTINGS.backendBaseUrl;
-  return raw.replace(/\/+$/, '');
+function normalizeBaseUrl(_value?: string): string {
+  return BACKEND_BASE_URL;
 }
 
 function normalizeMode(value?: string): Mode {
@@ -21,6 +21,7 @@ function normalizeMode(value?: string): Mode {
 
 export async function getSettings(): Promise<ExtensionSettings> {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
+
   return {
     backendBaseUrl: normalizeBaseUrl(stored.backendBaseUrl),
     apiKey: typeof stored.apiKey === 'string' ? stored.apiKey.trim() : '',
@@ -30,8 +31,9 @@ export async function getSettings(): Promise<ExtensionSettings> {
 
 export async function saveSettings(settings: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
   const current = await getSettings();
+
   const next: ExtensionSettings = {
-    backendBaseUrl: normalizeBaseUrl(settings.backendBaseUrl ?? current.backendBaseUrl),
+    backendBaseUrl: BACKEND_BASE_URL,
     apiKey: typeof settings.apiKey === 'string' ? settings.apiKey.trim() : current.apiKey,
     mode: normalizeMode(settings.mode ?? current.mode)
   };

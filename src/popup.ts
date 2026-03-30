@@ -1,7 +1,6 @@
-import { DEFAULT_SETTINGS } from './storage';
+import { BACKEND_BASE_URL, DEFAULT_SETTINGS } from './storage';
 import type { BackgroundResponse, CheckAuthResponse, ExtensionSettings } from './types';
 
-const backendBaseUrlInput = document.getElementById('backendBaseUrl') as HTMLInputElement;
 const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
 const modeSelect = document.getElementById('mode') as HTMLSelectElement;
 const saveButton = document.getElementById('saveButton') as HTMLButtonElement;
@@ -27,9 +26,46 @@ function setBusy(busy: boolean) {
   checkButton.disabled = busy;
 }
 
+function humanizeError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes('401') ||
+    normalized.includes('403') ||
+    normalized.includes('unauthorized') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('invalid') ||
+    normalized.includes('api key') ||
+    normalized.includes('api-ключ')
+  ) {
+    return 'API-ключ не подошёл. Проверьте его на сайте finerox.online.';
+  }
+
+  if (
+    normalized.includes('failed to fetch') ||
+    normalized.includes('networkerror') ||
+    normalized.includes('load failed')
+  ) {
+    return 'Не удалось связаться с сервисом. Проверьте интернет и повторите попытку.';
+  }
+
+  return message || fallback;
+}
+
+async function persistSettings(): Promise<ExtensionSettings> {
+  return sendMessage<ExtensionSettings>({
+    type: 'SAVE_SETTINGS',
+    payload: {
+      backendBaseUrl: BACKEND_BASE_URL,
+      apiKey: apiKeyInput.value,
+      mode: modeSelect.value
+    }
+  });
+}
+
 async function loadSettings() {
   const settings = await sendMessage<ExtensionSettings>({ type: 'GET_SETTINGS' });
-  backendBaseUrlInput.value = settings.backendBaseUrl || DEFAULT_SETTINGS.backendBaseUrl;
   apiKeyInput.value = settings.apiKey || '';
   modeSelect.value = settings.mode || DEFAULT_SETTINGS.mode;
 }
@@ -37,22 +73,14 @@ async function loadSettings() {
 async function saveSettings() {
   setBusy(true);
   try {
-    const settings = await sendMessage<ExtensionSettings>({
-      type: 'SAVE_SETTINGS',
-      payload: {
-        backendBaseUrl: backendBaseUrlInput.value,
-        apiKey: apiKeyInput.value,
-        mode: modeSelect.value
-      }
-    });
+    const settings = await persistSettings();
 
-    backendBaseUrlInput.value = settings.backendBaseUrl;
     apiKeyInput.value = settings.apiKey;
     modeSelect.value = settings.mode;
 
     setStatus('Настройки сохранены.', 'success');
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Не удалось сохранить настройки', 'error');
+    setStatus(humanizeError(error, 'Не удалось сохранить настройки.'), 'error');
   } finally {
     setBusy(false);
   }
@@ -61,17 +89,25 @@ async function saveSettings() {
 async function checkConnection() {
   setBusy(true);
   try {
-    await saveSettings();
+    const settings = await persistSettings();
+
+    apiKeyInput.value = settings.apiKey;
+    modeSelect.value = settings.mode;
+
     const data = await sendMessage<CheckAuthResponse>({ type: 'CHECK_CONNECTION' });
+
     if (!data.valid) {
-      throw new Error('Backend вернул valid=false');
+      throw new Error('invalid api key');
     }
 
-    const name = data.user?.name || data.user?.email || 'пользователь';
-    const modes = data.limits?.mode?.join(', ') || 'не указаны';
-    setStatus(`Соединение успешно. Пользователь: ${name}. Доступные режимы: ${modes}`, 'success');
+    const name = data.user?.name || data.user?.email;
+    if (name) {
+      setStatus(`Подключение успешно. Аккаунт: ${name}.`, 'success');
+    } else {
+      setStatus('Подключение успешно.', 'success');
+    }
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Ошибка проверки соединения', 'error');
+    setStatus(humanizeError(error, 'Не удалось проверить подключение.'), 'error');
   } finally {
     setBusy(false);
   }

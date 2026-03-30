@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "OZON Auto Reply Extension MVP",
+  "name": "Finerox — автоответы OZON",
   "version": "0.1.0",
-  "description": "Generates and inserts seller replies for OZON reviews using a local backend.",
+  "description": "Расширение для генерации и вставки ответов на отзывы OZON.",
   "permissions": ["storage"],
   "host_permissions": [
-    "http://localhost:3001/*",
-    "http://127.0.0.1:3001/*",
+    "https://api.finerox.online/*",
     "https://seller.ozon.ru/*",
+    "https://*.seller.ozon.ru/*",
     "https://*.ozon.ru/*"
   ],
   "background": {
@@ -15,7 +15,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "OZON Auto Reply",
+    "default_title": "Finerox",
     "default_popup": "popup.html"
   },
   "content_scripts": [

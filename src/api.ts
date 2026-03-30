@@ -7,16 +7,17 @@ import type {
 } from './types';
 
 function ensureSettings(settings: ExtensionSettings) {
-  if (!settings.backendBaseUrl) {
-    throw new Error('Не указан backend URL');
-  }
   if (!settings.apiKey) {
-    throw new Error('Не указан API-ключ');
+    throw new Error('Укажите API-ключ, полученный на сайте finerox.online.');
   }
 }
 
+function getBaseUrl(settings: ExtensionSettings): string {
+  return settings.backendBaseUrl.replace(/\/+$/, '');
+}
+
 function debugLog(stage: string, payload: unknown) {
-  console.info(`[OZON Auto Reply] ${stage}`, payload);
+  console.info(`[Finerox OZON Auto Reply] ${stage}`, payload);
 }
 
 async function parseError(response: Response): Promise<string> {
@@ -75,7 +76,9 @@ async function postJson<T>(
 
 export async function checkConnection(settings: ExtensionSettings): Promise<CheckAuthResponse> {
   ensureSettings(settings);
-  return postJson<CheckAuthResponse>(`${settings.backendBaseUrl}/v1/extension/auth/check`, {
+  const baseUrl = getBaseUrl(settings);
+
+  return postJson<CheckAuthResponse>(`${baseUrl}/v1/extension/auth/check`, {
     apiKey: settings.apiKey,
     body: {}
   });
@@ -86,7 +89,9 @@ export async function generateReply(
   payload: GenerateReplyPayload
 ): Promise<GenerateReplyResponse> {
   ensureSettings(settings);
-  return postJson<GenerateReplyResponse>(`${settings.backendBaseUrl}/v1/replies/generate`, {
+  const baseUrl = getBaseUrl(settings);
+
+  return postJson<GenerateReplyResponse>(`${baseUrl}/v1/replies/generate`, {
     apiKey: settings.apiKey,
     body: payload
   });
@@ -96,11 +101,9 @@ export async function reportReplyResult(
   settings: ExtensionSettings,
   payload: ReplyResultPayload
 ): Promise<unknown> {
-  if (!settings.backendBaseUrl) {
-    throw new Error('Не указан backend URL');
-  }
+  const baseUrl = getBaseUrl(settings);
 
-  return postJson<unknown>(`${settings.backendBaseUrl}/v1/replies/result`, {
+  return postJson<unknown>(`${baseUrl}/v1/replies/result`, {
     apiKey: settings.apiKey || undefined,
     body: payload
   });

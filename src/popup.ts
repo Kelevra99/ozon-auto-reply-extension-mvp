@@ -1,6 +1,7 @@
 import { BACKEND_BASE_URL, DEFAULT_SETTINGS } from './storage';
 import type { BackgroundResponse, CheckAuthResponse, ExtensionSettings } from './types';
 
+const enabledInput = document.getElementById('enabled') as HTMLInputElement;
 const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
 const modeSelect = document.getElementById('mode') as HTMLSelectElement;
 const saveButton = document.getElementById('saveButton') as HTMLButtonElement;
@@ -22,6 +23,7 @@ function setStatus(text: string, tone: 'default' | 'success' | 'error' = 'defaul
 }
 
 function setBusy(busy: boolean) {
+  enabledInput.disabled = busy;
   saveButton.disabled = busy;
   checkButton.disabled = busy;
 }
@@ -53,34 +55,69 @@ function humanizeError(error: unknown, fallback: string): string {
   return message || fallback;
 }
 
+function describeEnabledState(enabled: boolean): string {
+  return enabled
+    ? 'Расширение включено. На странице OZON появятся кнопки Finerox.'
+    : 'Расширение выключено. Finerox не меняет страницу OZON.';
+}
+
+function applySettings(settings: ExtensionSettings) {
+  enabledInput.checked = settings.enabled;
+  apiKeyInput.value = settings.apiKey || '';
+  modeSelect.value = settings.mode || DEFAULT_SETTINGS.mode;
+}
+
 async function persistSettings(): Promise<ExtensionSettings> {
   return sendMessage<ExtensionSettings>({
     type: 'SAVE_SETTINGS',
     payload: {
       backendBaseUrl: BACKEND_BASE_URL,
       apiKey: apiKeyInput.value,
-      mode: modeSelect.value
+      mode: modeSelect.value,
+      enabled: enabledInput.checked
     }
   });
 }
 
 async function loadSettings() {
   const settings = await sendMessage<ExtensionSettings>({ type: 'GET_SETTINGS' });
-  apiKeyInput.value = settings.apiKey || '';
-  modeSelect.value = settings.mode || DEFAULT_SETTINGS.mode;
+  applySettings(settings);
+  setStatus(describeEnabledState(settings.enabled));
 }
 
 async function saveSettings() {
   setBusy(true);
   try {
     const settings = await persistSettings();
-
-    apiKeyInput.value = settings.apiKey;
-    modeSelect.value = settings.mode;
-
-    setStatus('Настройки сохранены.', 'success');
+    applySettings(settings);
+    setStatus(
+      settings.enabled
+        ? 'Настройки сохранены. Расширение включено.'
+        : 'Настройки сохранены. Расширение выключено.',
+      'success'
+    );
   } catch (error) {
     setStatus(humanizeError(error, 'Не удалось сохранить настройки.'), 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function saveEnabledState() {
+  setBusy(true);
+  try {
+    const settings = await sendMessage<ExtensionSettings>({
+      type: 'SAVE_SETTINGS',
+      payload: {
+        enabled: enabledInput.checked
+      }
+    });
+
+    applySettings(settings);
+    setStatus(describeEnabledState(settings.enabled), 'success');
+  } catch (error) {
+    enabledInput.checked = !enabledInput.checked;
+    setStatus(humanizeError(error, 'Не удалось изменить состояние расширения.'), 'error');
   } finally {
     setBusy(false);
   }
@@ -90,9 +127,7 @@ async function checkConnection() {
   setBusy(true);
   try {
     const settings = await persistSettings();
-
-    apiKeyInput.value = settings.apiKey;
-    modeSelect.value = settings.mode;
+    applySettings(settings);
 
     const data = await sendMessage<CheckAuthResponse>({ type: 'CHECK_CONNECTION' });
 
@@ -112,6 +147,10 @@ async function checkConnection() {
     setBusy(false);
   }
 }
+
+enabledInput.addEventListener('change', () => {
+  void saveEnabledState();
+});
 
 saveButton.addEventListener('click', () => {
   void saveSettings();

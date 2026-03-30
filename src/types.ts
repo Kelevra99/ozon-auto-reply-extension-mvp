@@ -4,6 +4,7 @@ export type ExtensionSettings = {
   backendBaseUrl: string;
   apiKey: string;
   mode: Mode;
+  enabled: boolean;
 };
 
 export type ExtractedReview = {

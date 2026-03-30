@@ -6,3 +6,8 @@
 *.7z
 *.rar
 *.gz
+
+.DS_Store
+src/*.bak
+src/*.bak.*
+src/*.broken-toggle.bak

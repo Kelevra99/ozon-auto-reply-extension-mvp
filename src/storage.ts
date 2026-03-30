@@ -1,6 +1,6 @@
 import type { ExtensionSettings, Mode } from './types';
 
-export const BACKEND_BASE_URL = 'https://api.finerox.online'\;
+export const BACKEND_BASE_URL = 'https://api.finerox.online';
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   backendBaseUrl: BACKEND_BASE_URL,

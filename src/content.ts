@@ -47,7 +47,7 @@ const autoState = {
 function getRuntime() {
   const runtime = globalThis.chrome?.runtime;
   if (!runtime?.sendMessage) {
-    throw new Error('Расширение недоступно. Обновите страницу OZON после установки или перезагрузки расширения.');
+    throw new Error('Расширение недоступно. Обновите страницу OZON после перезагрузки расширения.');
   }
   return runtime;
 }
@@ -95,6 +95,7 @@ async function waitUntil(check: () => boolean, timeoutMs = 5000, intervalMs = 12
 
 function isElementVisible(element: HTMLElement | null | undefined): element is HTMLElement {
   if (!element) return false;
+
   const style = window.getComputedStyle(element);
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
     return false;
@@ -199,6 +200,8 @@ async function generateAndInsertForCard(card: HTMLElement, root: HTMLElement): P
         errorText: message
       });
     }
+
+    throw error;
   } finally {
     root.dataset.processing = 'false';
     setBusy(root, false);
@@ -343,7 +346,7 @@ function ensureAutoStyles() {
       font-size: 13px;
       line-height: 1.35;
       color: #5b6575;
-      max-width: 460px;
+      max-width: 520px;
     }
 
     .finerox-auto-status.success {
@@ -474,7 +477,7 @@ async function ensureWaitingFilterActive() {
     throw new Error('Не удалось включить фильтр "Ждут ответа"');
   }
 
-  await sleepRange(600, 1200);
+  await sleepRange(700, 1300);
 }
 
 async function refreshWaitingFilter() {
@@ -493,7 +496,7 @@ async function refreshWaitingFilter() {
       return Boolean(current && !isWaitingFilterActive(current));
     }, 5000, 140);
 
-    await sleepRange(500, 1000);
+    await sleepRange(700, 1300);
   }
 
   const nextFilterButton = findWaitingFilterButton();
@@ -517,7 +520,7 @@ async function refreshWaitingFilter() {
   autoState.batchTarget = randomInt(10, 15);
   autoState.refreshedWithoutWork = false;
 
-  await sleepRange(900, 1700);
+  await sleepRange(1200, 2200);
 }
 
 function getRowStatus(row: HTMLElement): 'Новый' | 'Просмотрен' | 'Обработан' | null {
@@ -581,7 +584,40 @@ function getOpenReviewModal(): HTMLElement | null {
   return cards[0] ?? null;
 }
 
+function hasModalOpen(): boolean {
+  return Boolean(getOpenReviewModal());
+}
+
+function isModalFullyLoaded(modal: HTMLElement): boolean {
+  const reviewText = normalizeText(extractCommentTextFromModal(modal));
+  const input = findReplyInput(modal);
+  return Boolean(reviewText && input);
+}
+
+function extractCommentTextFromModal(modal: HTMLElement): string | null {
+  const rows = Array.from(modal.querySelectorAll<HTMLElement>('.n1d-l7'));
+
+  for (const row of rows) {
+    const text = normalizeText(row.innerText);
+    if (!text.includes('Комментарий')) continue;
+
+    const body = row.querySelector<HTMLElement>('.n1d-m');
+    const value = normalizeText(body?.innerText ?? '');
+    const cleaned = value.replace(/^Комментарий\s*/i, '').trim();
+
+    if (cleaned) return cleaned;
+  }
+
+  const raw = normalizeText(modal.innerText);
+  const match = raw.match(/Комментарий\s+(.+?)\s+Оценки/si);
+  return normalizeText(match?.[1] ?? null) || null;
+}
+
 async function openCandidate(candidate: ReviewRowCandidate): Promise<HTMLElement> {
+  if (hasModalOpen()) {
+    throw new Error('Предыдущее модальное окно ещё не закрыто');
+  }
+
   setAutoStatus(`Открываю отзыв: ${truncate(candidate.title, 56)}...`);
   triedTitlesInCycle.add(candidate.title);
 
@@ -592,14 +628,29 @@ async function openCandidate(candidate: ReviewRowCandidate): Promise<HTMLElement
     throw new Error('Не открылось окно отзыва');
   }
 
-  await sleepRange(500, 1000);
+  await sleepRange(2000, 3000);
 
   const modal = getOpenReviewModal();
   if (!modal) {
     throw new Error('Модальное окно не найдено после открытия');
   }
 
-  return modal;
+  const ready = await waitUntil(() => {
+    const currentModal = getOpenReviewModal();
+    if (!currentModal) return false;
+    return isModalFullyLoaded(currentModal);
+  }, 5000, 150);
+
+  if (!ready) {
+    throw new Error('Модальное окно открылось не полностью');
+  }
+
+  const readyModal = getOpenReviewModal();
+  if (!readyModal) {
+    throw new Error('Модальное окно пропало после загрузки');
+  }
+
+  return readyModal;
 }
 
 function isCandidateHandled(candidate: ReviewRowCandidate): boolean {
@@ -611,7 +662,7 @@ function findSendReplyButton(modal: HTMLElement): HTMLButtonElement | null {
   const textarea = modal.querySelector<HTMLTextAreaElement>('#AnswerCommentForm');
   const allButtons = Array.from(modal.querySelectorAll<HTMLButtonElement>('button[type="submit"]')).filter(isElementVisible);
 
-  const disallowedTexts = ['Сгенерировать', 'Ответить на отзыв', 'Написать в чат', 'Закрепить'];
+  const disallowedTexts = ['Сгенерировать', 'Ответить на отзыв', 'Написать в чат', 'Закрепить', 'Удалить', 'Редактировать'];
   const candidates = allButtons.filter((button) => {
     const text = normalizeText(button.innerText);
     return !disallowedTexts.some((part) => text.includes(part));
@@ -633,23 +684,6 @@ function findSendReplyButton(modal: HTMLElement): HTMLButtonElement | null {
     });
 
   return nearest[0]?.button ?? candidates[candidates.length - 1] ?? null;
-}
-
-function findCloseModalButton(modal: HTMLElement): HTMLButtonElement | null {
-  const container = modal.parentElement ?? modal;
-  const modalRect = modal.getBoundingClientRect();
-
-  return (
-    Array.from(container.querySelectorAll<HTMLButtonElement>('button[type="button"]'))
-      .filter(isElementVisible)
-      .find((button) => {
-        const text = normalizeText(button.innerText);
-        if (text) return false;
-
-        const rect = button.getBoundingClientRect();
-        return rect.top <= modalRect.top + 40 && rect.left >= modalRect.right - 120;
-      }) ?? null
-  );
 }
 
 function findPostedSellerReplyBlock(modal: HTMLElement): HTMLElement | null {
@@ -685,16 +719,45 @@ function hasPostedSellerReply(modal: HTMLElement, expectedReply?: string): boole
   return !expectedSample || blockText.includes(expectedSample);
 }
 
-async function closeOpenModalIfAny() {
+function findCloseModalButton(modal: HTMLElement): HTMLButtonElement | null {
+  const container = modal.parentElement ?? modal;
+  const modalRect = modal.getBoundingClientRect();
+
+  return (
+    Array.from(container.querySelectorAll<HTMLButtonElement>('button[type="button"]'))
+      .filter(isElementVisible)
+      .find((button) => {
+        const text = normalizeText(button.innerText);
+        if (text) return false;
+
+        const rect = button.getBoundingClientRect();
+        return rect.top <= modalRect.top + 50 && rect.left >= modalRect.right - 140;
+      }) ?? null
+  );
+}
+
+async function closeOpenModalStrictly() {
   const modal = getOpenReviewModal();
   if (!modal) return;
 
   const closeButton = findCloseModalButton(modal);
-  if (!closeButton) return;
+  if (!closeButton) {
+    throw new Error('Не найдена кнопка закрытия модального окна');
+  }
 
   await clickElement(closeButton);
-  await waitUntil(() => !getOpenReviewModal(), 3500, 120);
-  await sleepRange(250, 700);
+
+  const closed = await waitUntil(() => !getOpenReviewModal(), 6000, 120);
+  if (!closed) {
+    throw new Error('Не удалось закрыть модальное окно');
+  }
+
+  const listReady = await waitUntil(() => getVisiblePendingCandidates().length >= 0 && !hasModalOpen(), 4000, 120);
+  if (!listReady) {
+    throw new Error('Список не вернулся после закрытия модального окна');
+  }
+
+  await sleep(1000);
 }
 
 async function recoverByReload(reason: string): Promise<never> {
@@ -727,7 +790,7 @@ async function processCandidate(candidate: ReviewRowCandidate): Promise<boolean>
     throw new Error('Ответ не вставился в поле');
   }
 
-  await sleepRange(500, 1100);
+  await sleepRange(400, 900);
 
   const sendButton = findSendReplyButton(modal);
   if (!sendButton) {
@@ -737,37 +800,23 @@ async function processCandidate(candidate: ReviewRowCandidate): Promise<boolean>
   setAutoStatus(`Отправляю ответ: ${truncate(candidate.title, 50)}...`);
   await clickElement(sendButton);
 
+  await sleepRange(2000, 3000);
+
   const replyAppeared = await waitUntil(() => {
     const currentModal = getOpenReviewModal();
     if (!currentModal) return false;
     return hasPostedSellerReply(currentModal, insertedText);
-  }, 12000, 180);
+  }, 15000, 200);
 
   if (!replyAppeared) {
     throw new Error('После отправки в модальном окне не появился опубликованный ответ');
   }
 
-  setAutoStatus(`Ответ появился в карточке: ${truncate(candidate.title, 50)}. Закрываю окно...`, 'success');
-  await sleepRange(1200, 2200);
+  setAutoStatus(`Ответ появился: ${truncate(candidate.title, 50)}. Закрываю окно...`, 'success');
 
-  const currentModal = getOpenReviewModal();
-  if (!currentModal) {
-    throw new Error('Модальное окно исчезло до закрытия');
-  }
+  await sleep(1000);
+  await closeOpenModalStrictly();
 
-  const closeButton = findCloseModalButton(currentModal);
-  if (!closeButton) {
-    throw new Error('Не найдена кнопка закрытия модального окна');
-  }
-
-  await clickElement(closeButton);
-
-  const closed = await waitUntil(() => !getOpenReviewModal(), 5000, 120);
-  if (!closed) {
-    throw new Error('Не удалось закрыть модальное окно');
-  }
-
-  await sleepRange(1800, 3200);
   return true;
 }
 
@@ -808,6 +857,15 @@ async function runAutoModeLoop() {
     while (autoState.enabled && !autoState.stopRequested) {
       ensureAutoControls();
 
+      if (hasModalOpen()) {
+        setAutoStatus('Жду закрытия текущего модального окна...');
+        const closed = await waitUntil(() => !hasModalOpen(), 8000, 150);
+        if (!closed) {
+          throw new Error('Модальное окно не закрылось вовремя');
+        }
+        await sleep(1000);
+      }
+
       if (autoState.processedInBatch >= autoState.batchTarget) {
         await refreshWaitingFilter();
       }
@@ -839,13 +897,21 @@ async function runAutoModeLoop() {
             'success'
           );
 
-          await sleepRange(1200, 2600);
+          await sleep(1000);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Ошибка автоответа';
         setAutoStatus(message, 'error');
-        await closeOpenModalIfAny();
-        await sleepRange(900, 1600);
+
+        if (hasModalOpen()) {
+          try {
+            await closeOpenModalStrictly();
+          } catch (closeError) {
+            console.warn('[Finerox Auto Reply] failed to close modal after error', closeError);
+          }
+        }
+
+        await sleepRange(1200, 2200);
       }
     }
   } finally {

@@ -652,6 +652,39 @@ function findCloseModalButton(modal: HTMLElement): HTMLButtonElement | null {
   );
 }
 
+function findPostedSellerReplyBlock(modal: HTMLElement): HTMLElement | null {
+  const blocks = Array.from(modal.querySelectorAll<HTMLElement>('div.n1d-p4')).filter(isElementVisible);
+
+  for (const block of blocks) {
+    const text = normalizeText(block.innerText);
+
+    const hasDelete = text.includes('Удалить');
+    const hasEdit = text.includes('Редактировать');
+    const hasSellerReply =
+      text.includes('Официальный представитель продавца') ||
+      /ответ\s+/i.test(text) ||
+      text.includes('На модерации');
+
+    if ((hasDelete || hasEdit) && hasSellerReply) {
+      return block;
+    }
+  }
+
+  return null;
+}
+
+function hasPostedSellerReply(modal: HTMLElement, expectedReply?: string): boolean {
+  const block = findPostedSellerReplyBlock(modal);
+  if (!block) return false;
+
+  if (!expectedReply) return true;
+
+  const blockText = normalizeText(block.innerText);
+  const expectedSample = normalizeText(expectedReply).slice(0, 80);
+
+  return !expectedSample || blockText.includes(expectedSample);
+}
+
 async function closeOpenModalIfAny() {
   const modal = getOpenReviewModal();
   if (!modal) return;
@@ -704,17 +737,37 @@ async function processCandidate(candidate: ReviewRowCandidate): Promise<boolean>
   setAutoStatus(`Отправляю ответ: ${truncate(candidate.title, 50)}...`);
   await clickElement(sendButton);
 
-  const confirmed = await waitUntil(() => !getOpenReviewModal() || isCandidateHandled(candidate), 9000, 150);
+  const replyAppeared = await waitUntil(() => {
+    const currentModal = getOpenReviewModal();
+    if (!currentModal) return false;
+    return hasPostedSellerReply(currentModal, insertedText);
+  }, 12000, 180);
 
-  if (!confirmed) {
-    await closeOpenModalIfAny();
-
-    if (!isCandidateHandled(candidate)) {
-      throw new Error('Не удалось подтвердить отправку ответа');
-    }
+  if (!replyAppeared) {
+    throw new Error('После отправки в модальном окне не появился опубликованный ответ');
   }
 
-  await sleepRange(700, 1300);
+  setAutoStatus(`Ответ появился в карточке: ${truncate(candidate.title, 50)}. Закрываю окно...`, 'success');
+  await sleepRange(1200, 2200);
+
+  const currentModal = getOpenReviewModal();
+  if (!currentModal) {
+    throw new Error('Модальное окно исчезло до закрытия');
+  }
+
+  const closeButton = findCloseModalButton(currentModal);
+  if (!closeButton) {
+    throw new Error('Не найдена кнопка закрытия модального окна');
+  }
+
+  await clickElement(closeButton);
+
+  const closed = await waitUntil(() => !getOpenReviewModal(), 5000, 120);
+  if (!closed) {
+    throw new Error('Не удалось закрыть модальное окно');
+  }
+
+  await sleepRange(1800, 3200);
   return true;
 }
 

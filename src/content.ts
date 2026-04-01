@@ -1124,22 +1124,40 @@ async function closeOpenModalStrictly() {
 
   setAutoStatus('Закрываю модальное окно...');
 
-  const backdrop = findModalBackdrop(modal);
-  if (backdrop) {
-    fireRealClick(backdrop);
+  const rect = modal.getBoundingClientRect();
+
+  const points = [
+    {
+      x: Math.max(8, Math.floor(rect.left / 2)),
+      y: Math.max(8, Math.floor(rect.top + Math.min(rect.height / 2, 80)))
+    },
+    {
+      x: Math.min(window.innerWidth - 8, Math.floor(rect.right + (window.innerWidth - rect.right) / 2)),
+      y: Math.max(8, Math.floor(rect.top + Math.min(rect.height / 2, 80)))
+    },
+    {
+      x: Math.max(8, Math.floor(rect.left / 2)),
+      y: Math.max(8, Math.floor(rect.top / 2))
+    },
+    {
+      x: Math.min(window.innerWidth - 8, Math.floor(rect.right + (window.innerWidth - rect.right) / 2)),
+      y: Math.max(8, Math.floor(rect.top / 2))
+    }
+  ];
+
+  for (const point of points) {
+    const target = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
+    if (!target) continue;
+    if (modal.contains(target)) continue;
+
+    fireRealClick(target);
 
     const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
     if (closed) {
       return;
     }
-  }
 
-  const currentModal = getOpenReviewModal();
-  if (currentModal && clickOutsideModalByPoint(currentModal)) {
-    const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
-    if (closed) {
-      return;
-    }
+    await sleep(120);
   }
 
   throw new Error('Не удалось закрыть модальное окно кликом вне окна');

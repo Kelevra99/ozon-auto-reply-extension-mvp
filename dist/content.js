@@ -1293,15 +1293,10 @@ function fireRealClick(target) {
     target.click();
   }
 }
-function findModalBackdrop(modal) {
-  const root = modal.parentElement ?? document.body;
-  const candidates = Array.from(root.querySelectorAll("div, section, aside")).filter(isElementVisible2).filter((element) => element !== modal && !element.contains(modal) && !modal.contains(element)).filter((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.width >= window.innerWidth * 0.85 && rect.height >= window.innerHeight * 0.85;
-  });
-  return candidates[0] ?? null;
-}
-function clickOutsideModalByPoint(modal) {
+async function closeOpenModalStrictly() {
+  const modal = getOpenReviewModal();
+  if (!modal) return;
+  setAutoStatus("\u0417\u0430\u043A\u0440\u044B\u0432\u0430\u044E \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E...");
   const rect = modal.getBoundingClientRect();
   const points = [
     {
@@ -1315,6 +1310,10 @@ function clickOutsideModalByPoint(modal) {
     {
       x: Math.max(8, Math.floor(rect.left / 2)),
       y: Math.max(8, Math.floor(rect.top / 2))
+    },
+    {
+      x: Math.min(window.innerWidth - 8, Math.floor(rect.right + (window.innerWidth - rect.right) / 2)),
+      y: Math.max(8, Math.floor(rect.top / 2))
     }
   ];
   for (const point of points) {
@@ -1322,28 +1321,11 @@ function clickOutsideModalByPoint(modal) {
     if (!target) continue;
     if (modal.contains(target)) continue;
     fireRealClick(target);
-    return true;
-  }
-  return false;
-}
-async function closeOpenModalStrictly() {
-  const modal = getOpenReviewModal();
-  if (!modal) return;
-  setAutoStatus("\u0417\u0430\u043A\u0440\u044B\u0432\u0430\u044E \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E...");
-  const backdrop = findModalBackdrop(modal);
-  if (backdrop) {
-    fireRealClick(backdrop);
     const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
     if (closed) {
       return;
     }
-  }
-  const currentModal = getOpenReviewModal();
-  if (currentModal && clickOutsideModalByPoint(currentModal)) {
-    const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
-    if (closed) {
-      return;
-    }
+    await sleep(120);
   }
   throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043A\u043B\u0438\u043A\u043E\u043C \u0432\u043D\u0435 \u043E\u043A\u043D\u0430");
 }

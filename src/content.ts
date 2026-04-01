@@ -534,23 +534,28 @@ async function ensureWaitingFilterActive() {
     throw new Error('Не найдена кнопка "Ждут ответа"');
   }
 
-  if (isWaitingFilterActive(filterButton)) {
-    return;
+  if (!isWaitingFilterActive(filterButton)) {
+    setAutoStatus('Включаю фильтр "Ждут ответа"...');
+    await clickElement(filterButton);
+
+    const activated = await waitUntil(() => {
+      const current = findWaitingFilterButton();
+      return Boolean(current && isWaitingFilterActive(current));
+    }, 7000, 140);
+
+    if (!activated) {
+      throw new Error('Не удалось включить фильтр "Ждут ответа"');
+    }
   }
 
-  setAutoStatus('Включаю фильтр "Ждут ответа"...');
-  await clickElement(filterButton);
+  setAutoStatus('Жду обновления списка отзывов...');
+  const rebuilt = await waitForWaitingFilterDomRebuild(10000);
 
-  const activated = await waitUntil(() => {
-    const current = findWaitingFilterButton();
-    return Boolean(current && isWaitingFilterActive(current));
-  }, 7000, 140);
-
-  if (!activated) {
-    throw new Error('Не удалось включить фильтр "Ждут ответа"');
+  if (!rebuilt) {
+    setAutoStatus('Список отзывов обновился не полностью. Продолжаю с перепроверкой.', 'warn');
   }
 
-  await sleepRange(700, 1300);
+  await sleepRange(300, 700);
 }
 
 async function refreshWaitingFilter() {
@@ -569,7 +574,7 @@ async function refreshWaitingFilter() {
       return Boolean(current && !isWaitingFilterActive(current));
     }, 5000, 140);
 
-    await sleepRange(700, 1300);
+    await sleepRange(500, 900);
   }
 
   const nextFilterButton = findWaitingFilterButton();
@@ -593,7 +598,13 @@ async function refreshWaitingFilter() {
   autoState.batchTarget = randomInt(10, 15);
   autoState.refreshedWithoutWork = false;
 
-  await sleepRange(1200, 2200);
+  const rebuilt = await waitForWaitingFilterDomRebuild(10000);
+
+  if (!rebuilt) {
+    setAutoStatus('После обновления фильтра список перестроился не полностью.', 'warn');
+  }
+
+  await sleepRange(350, 800);
 }
 
 function getRowStatus(row: HTMLElement): 'Новый' | 'Просмотрен' | 'Обработан' | null {
@@ -604,6 +615,83 @@ function getRowStatus(row: HTMLElement): 'Новый' | 'Просмотрен' |
   if (text.includes('Новый')) return 'Новый';
 
   return null;
+}
+
+function rowContainsOnlyRatingWithoutText(row: HTMLElement): boolean {
+  const text = normalizeText(row.innerText);
+  return (
+    text.includes('Только оценка без текста') ||
+    text.includes('В отзыве есть только оценка без текста')
+  );
+}
+
+function modalContainsOnlyRatingWithoutText(modal: HTMLElement): boolean {
+  const text = normalizeText(modal.innerText);
+  return (
+    text.includes('В отзыве есть только оценка без текста') ||
+    text.includes('Только оценка без текста')
+  );
+}
+
+function hasVisibleOnlyRatingWithoutTextRows(): boolean {
+  for (const statusNode of getVisibleStatusNodes()) {
+    const row = findCandidateRowRootFromStatusNode(statusNode);
+    if (!row) continue;
+    if (rowContainsOnlyRatingWithoutText(row)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getPendingListSnapshot(): string {
+  const candidates = getVisiblePendingCandidates();
+  return candidates
+    .slice(0, 8)
+    .map((candidate) => `${candidate.status}:${truncate(candidate.title, 40)}`)
+    .join(' | ');
+}
+
+async function waitForWaitingFilterDomRebuild(timeoutMs = 10000): Promise<boolean> {
+  const startedAt = Date.now();
+  let previousSnapshot = '';
+  let stableHits = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const button = findWaitingFilterButton();
+    const active = Boolean(button && isWaitingFilterActive(button));
+    const hasOnlyRatingRows = hasVisibleOnlyRatingWithoutTextRows();
+    const snapshot = `${active}|${hasOnlyRatingRows}|${getPendingListSnapshot()}`;
+
+    if (active && !hasOnlyRatingRows) {
+      stableHits = snapshot === previousSnapshot ? stableHits + 1 : 1;
+      if (stableHits >= 2) {
+        return true;
+      }
+    } else {
+      stableHits = 0;
+    }
+
+    previousSnapshot = snapshot;
+    await sleep(1000);
+  }
+
+  return false;
+}
+
+async function recoverWaitingFilterList(reason: string, maxAttempts = 2): Promise<boolean> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    setAutoStatus(`${reason} Обновляю фильтр (${attempt}/${maxAttempts})...`, 'warn');
+    await refreshWaitingFilter();
+
+    const hasCandidates = getVisiblePendingCandidates().length > 0;
+    if (hasCandidates && !hasVisibleOnlyRatingWithoutTextRows()) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function uniqueElements<T extends HTMLElement>(items: T[]): T[] {
@@ -773,6 +861,7 @@ function getVisiblePendingCandidates(): ReviewRowCandidate[] {
 
     const row = findCandidateRowRootFromStatusNode(statusNode);
     if (!row || usedRows.has(row)) continue;
+    if (rowContainsOnlyRatingWithoutText(row)) continue;
 
     const clickTargets = collectCandidateClickTargets(row, statusNode);
     if (!clickTargets.length) continue;
@@ -1173,6 +1262,14 @@ async function recoverByReload(reason: string): Promise<never> {
 
 async function processCandidate(candidate: ReviewRowCandidate): Promise<boolean> {
   const modal = await openCandidate(candidate);
+
+  if (modalContainsOnlyRatingWithoutText(modal)) {
+    setAutoStatus('OZON показал отзыв только с оценкой. Обновляю фильтр...', 'warn');
+    await closeOpenModalStrictly();
+    await recoverWaitingFilterList('Список отзывов ещё не перестроился.', 1);
+    return false;
+  }
+
   const review = await extractReview(modal);
   const input = findReplyInput(modal);
 
@@ -1281,7 +1378,17 @@ async function runAutoModeLoop() {
       const candidate = pickNextCandidate();
 
       if (!candidate) {
-        await stopAutoMode('Не найдены видимые отзывы со статусом "Новый" или "Просмотрен".');
+        const recovered = await recoverWaitingFilterList(
+          'Отзывы временно не видны. Перепроверяю список.',
+          2
+        );
+
+        if (recovered) {
+          await sleep(250);
+          continue;
+        }
+
+        await stopAutoMode('Не найдены новые отзывы после двух обновлений фильтра.');
         break;
       }
 

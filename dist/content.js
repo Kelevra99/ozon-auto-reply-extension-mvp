@@ -902,19 +902,23 @@ async function ensureWaitingFilterActive() {
   if (!filterButton) {
     throw new Error('\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u043A\u043D\u043E\u043F\u043A\u0430 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
   }
-  if (isWaitingFilterActive(filterButton)) {
-    return;
+  if (!isWaitingFilterActive(filterButton)) {
+    setAutoStatus('\u0412\u043A\u043B\u044E\u0447\u0430\u044E \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"...');
+    await clickElement(filterButton);
+    const activated = await waitUntil(() => {
+      const current = findWaitingFilterButton();
+      return Boolean(current && isWaitingFilterActive(current));
+    }, 7e3, 140);
+    if (!activated) {
+      throw new Error('\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+    }
   }
-  setAutoStatus('\u0412\u043A\u043B\u044E\u0447\u0430\u044E \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"...');
-  await clickElement(filterButton);
-  const activated = await waitUntil(() => {
-    const current = findWaitingFilterButton();
-    return Boolean(current && isWaitingFilterActive(current));
-  }, 7e3, 140);
-  if (!activated) {
-    throw new Error('\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0444\u0438\u043B\u044C\u0442\u0440 "\u0416\u0434\u0443\u0442 \u043E\u0442\u0432\u0435\u0442\u0430"');
+  setAutoStatus("\u0416\u0434\u0443 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F \u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0442\u0437\u044B\u0432\u043E\u0432...");
+  const rebuilt = await waitForWaitingFilterDomRebuild(1e4);
+  if (!rebuilt) {
+    setAutoStatus("\u0421\u043F\u0438\u0441\u043E\u043A \u043E\u0442\u0437\u044B\u0432\u043E\u0432 \u043E\u0431\u043D\u043E\u0432\u0438\u043B\u0441\u044F \u043D\u0435 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E. \u041F\u0440\u043E\u0434\u043E\u043B\u0436\u0430\u044E \u0441 \u043F\u0435\u0440\u0435\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u043E\u0439.", "warn");
   }
-  await sleepRange(700, 1300);
+  await sleepRange(300, 700);
 }
 async function refreshWaitingFilter() {
   const filterButton = findWaitingFilterButton();
@@ -928,7 +932,7 @@ async function refreshWaitingFilter() {
       const current = findWaitingFilterButton();
       return Boolean(current && !isWaitingFilterActive(current));
     }, 5e3, 140);
-    await sleepRange(700, 1300);
+    await sleepRange(500, 900);
   }
   const nextFilterButton = findWaitingFilterButton();
   if (!nextFilterButton) {
@@ -946,7 +950,11 @@ async function refreshWaitingFilter() {
   autoState.processedInBatch = 0;
   autoState.batchTarget = randomInt(10, 15);
   autoState.refreshedWithoutWork = false;
-  await sleepRange(1200, 2200);
+  const rebuilt = await waitForWaitingFilterDomRebuild(1e4);
+  if (!rebuilt) {
+    setAutoStatus("\u041F\u043E\u0441\u043B\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F \u0444\u0438\u043B\u044C\u0442\u0440\u0430 \u0441\u043F\u0438\u0441\u043E\u043A \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u043B\u0441\u044F \u043D\u0435 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E.", "warn");
+  }
+  await sleepRange(350, 800);
 }
 function getRowStatus(row) {
   const text = normalizeText2(row.innerText);
@@ -954,6 +962,61 @@ function getRowStatus(row) {
   if (text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D")) return "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D";
   if (text.includes("\u041D\u043E\u0432\u044B\u0439")) return "\u041D\u043E\u0432\u044B\u0439";
   return null;
+}
+function rowContainsOnlyRatingWithoutText(row) {
+  const text = normalizeText2(row.innerText);
+  return text.includes("\u0422\u043E\u043B\u044C\u043A\u043E \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u0437 \u0442\u0435\u043A\u0441\u0442\u0430") || text.includes("\u0412 \u043E\u0442\u0437\u044B\u0432\u0435 \u0435\u0441\u0442\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u0437 \u0442\u0435\u043A\u0441\u0442\u0430");
+}
+function modalContainsOnlyRatingWithoutText(modal) {
+  const text = normalizeText2(modal.innerText);
+  return text.includes("\u0412 \u043E\u0442\u0437\u044B\u0432\u0435 \u0435\u0441\u0442\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u0437 \u0442\u0435\u043A\u0441\u0442\u0430") || text.includes("\u0422\u043E\u043B\u044C\u043A\u043E \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u0437 \u0442\u0435\u043A\u0441\u0442\u0430");
+}
+function hasVisibleOnlyRatingWithoutTextRows() {
+  for (const statusNode of getVisibleStatusNodes()) {
+    const row = findCandidateRowRootFromStatusNode(statusNode);
+    if (!row) continue;
+    if (rowContainsOnlyRatingWithoutText(row)) {
+      return true;
+    }
+  }
+  return false;
+}
+function getPendingListSnapshot() {
+  const candidates = getVisiblePendingCandidates();
+  return candidates.slice(0, 8).map((candidate) => `${candidate.status}:${truncate(candidate.title, 40)}`).join(" | ");
+}
+async function waitForWaitingFilterDomRebuild(timeoutMs = 1e4) {
+  const startedAt = Date.now();
+  let previousSnapshot = "";
+  let stableHits = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    const button = findWaitingFilterButton();
+    const active = Boolean(button && isWaitingFilterActive(button));
+    const hasOnlyRatingRows = hasVisibleOnlyRatingWithoutTextRows();
+    const snapshot = `${active}|${hasOnlyRatingRows}|${getPendingListSnapshot()}`;
+    if (active && !hasOnlyRatingRows) {
+      stableHits = snapshot === previousSnapshot ? stableHits + 1 : 1;
+      if (stableHits >= 2) {
+        return true;
+      }
+    } else {
+      stableHits = 0;
+    }
+    previousSnapshot = snapshot;
+    await sleep(1e3);
+  }
+  return false;
+}
+async function recoverWaitingFilterList(reason, maxAttempts = 2) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    setAutoStatus(`${reason} \u041E\u0431\u043D\u043E\u0432\u043B\u044F\u044E \u0444\u0438\u043B\u044C\u0442\u0440 (${attempt}/${maxAttempts})...`, "warn");
+    await refreshWaitingFilter();
+    const hasCandidates = getVisiblePendingCandidates().length > 0;
+    if (hasCandidates && !hasVisibleOnlyRatingWithoutTextRows()) {
+      return true;
+    }
+  }
+  return false;
 }
 function uniqueElements(items) {
   return Array.from(new Set(items));
@@ -1075,6 +1138,7 @@ function getVisiblePendingCandidates() {
     if (status !== "\u041D\u043E\u0432\u044B\u0439" && status !== "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D") continue;
     const row = findCandidateRowRootFromStatusNode(statusNode);
     if (!row || usedRows.has(row)) continue;
+    if (rowContainsOnlyRatingWithoutText(row)) continue;
     const clickTargets = collectCandidateClickTargets(row, statusNode);
     if (!clickTargets.length) continue;
     usedRows.add(row);
@@ -1338,6 +1402,12 @@ async function recoverByReload(reason) {
 }
 async function processCandidate(candidate) {
   const modal = await openCandidate(candidate);
+  if (modalContainsOnlyRatingWithoutText(modal)) {
+    setAutoStatus("OZON \u043F\u043E\u043A\u0430\u0437\u0430\u043B \u043E\u0442\u0437\u044B\u0432 \u0442\u043E\u043B\u044C\u043A\u043E \u0441 \u043E\u0446\u0435\u043D\u043A\u043E\u0439. \u041E\u0431\u043D\u043E\u0432\u043B\u044F\u044E \u0444\u0438\u043B\u044C\u0442\u0440...", "warn");
+    await closeOpenModalStrictly();
+    await recoverWaitingFilterList("\u0421\u043F\u0438\u0441\u043E\u043A \u043E\u0442\u0437\u044B\u0432\u043E\u0432 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u043B\u0441\u044F.", 1);
+    return false;
+  }
   const review = await extractReview(modal);
   const input = findReplyInput(modal);
   if (!normalizeText2(review.reviewText) || !input) {
@@ -1416,7 +1486,15 @@ async function runAutoModeLoop() {
       }
       const candidate = pickNextCandidate();
       if (!candidate) {
-        await stopAutoMode('\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u0432\u0438\u0434\u0438\u043C\u044B\u0435 \u043E\u0442\u0437\u044B\u0432\u044B \u0441\u043E \u0441\u0442\u0430\u0442\u0443\u0441\u043E\u043C "\u041D\u043E\u0432\u044B\u0439" \u0438\u043B\u0438 "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D".');
+        const recovered = await recoverWaitingFilterList(
+          "\u041E\u0442\u0437\u044B\u0432\u044B \u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E \u043D\u0435 \u0432\u0438\u0434\u043D\u044B. \u041F\u0435\u0440\u0435\u043F\u0440\u043E\u0432\u0435\u0440\u044F\u044E \u0441\u043F\u0438\u0441\u043E\u043A.",
+          2
+        );
+        if (recovered) {
+          await sleep(250);
+          continue;
+        }
+        await stopAutoMode("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u043D\u043E\u0432\u044B\u0435 \u043E\u0442\u0437\u044B\u0432\u044B \u043F\u043E\u0441\u043B\u0435 \u0434\u0432\u0443\u0445 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439 \u0444\u0438\u043B\u044C\u0442\u0440\u0430.");
         break;
       }
       autoState.refreshedWithoutWork = false;

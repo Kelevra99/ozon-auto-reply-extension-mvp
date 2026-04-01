@@ -948,6 +948,13 @@ async function refreshWaitingFilter() {
   autoState.refreshedWithoutWork = false;
   await sleepRange(1200, 2200);
 }
+function getRowStatus(row) {
+  const text = normalizeText2(row.innerText);
+  if (text.includes("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D")) return "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D";
+  if (text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D")) return "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D";
+  if (text.includes("\u041D\u043E\u0432\u044B\u0439")) return "\u041D\u043E\u0432\u044B\u0439";
+  return null;
+}
 function uniqueElements(items) {
   return Array.from(new Set(items));
 }
@@ -975,47 +982,90 @@ function findCandidateRowRootFromStatusNode(statusNode) {
   }
   return null;
 }
+function isStatusChipText(text) {
+  return text === "\u041D\u043E\u0432\u044B\u0439" || text === "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" || text === "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D";
+}
 function looksLikeRatingText(text) {
-  return /[1-5]/.test(text) || /оценк/i.test(text);
+  return /[1-5]/.test(text) || /★|звезд|оценк/i.test(text);
 }
-function scoreCandidateTarget(element) {
-  const text = normalizeText2(element.innerText || element.textContent || element.getAttribute("title"));
-  let score = 0;
-  if (element.matches('a[href], button, [role="button"], [tabindex]')) score += 3;
-  if (text.length >= 16) score += 4;
-  if (text.length >= 40) score += 2;
-  if (looksLikeRatingText(text)) score += 3;
-  if (/отзыв|товар|комментар/i.test(text)) score += 2;
-  return score;
+function getElementText(element) {
+  return normalizeText2(element.innerText || element.textContent || element.getAttribute("title"));
 }
-function collectCandidateClickTargets(row) {
-  const directTargets = Array.from(
-    row.querySelectorAll('a[href], button, [role="button"], [tabindex], [title]')
-  ).filter(isElementVisible2).filter((element) => {
-    const text = normalizeText2(element.innerText || element.textContent || element.getAttribute("title"));
-    if (!text) return false;
-    if (text === "\u041D\u043E\u0432\u044B\u0439" || text === "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" || text === "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D") return false;
-    return text.length >= 3;
-  });
-  const textTargets = Array.from(row.querySelectorAll("div, span, p")).filter(isElementVisible2).filter((element) => {
-    const text = normalizeText2(element.innerText || element.textContent);
-    if (!text) return false;
-    if (text === "\u041D\u043E\u0432\u044B\u0439" || text === "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" || text === "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D") return false;
-    if (text.length < 12 || text.length > 280) return false;
-    return true;
-  });
-  return uniqueElements([...directTargets, ...textTargets]).sort((a, b) => scoreCandidateTarget(b) - scoreCandidateTarget(a)).slice(0, 8);
+function getCenterX(rect) {
+  return rect.left + rect.width / 2;
+}
+function hasVerticalOverlap(rect, statusRect) {
+  return rect.bottom >= statusRect.top - 24 && rect.top <= statusRect.bottom + 24;
+}
+function isForbiddenProductLinkTarget(element) {
+  return Boolean(element.closest("a[href]"));
+}
+function isReasonableTextTarget(text) {
+  return text.length >= 1 && text.length <= 320;
+}
+function collectReviewTextTargets(row, statusNode) {
+  const statusRect = statusNode.getBoundingClientRect();
+  const minX = statusRect.left - 360;
+  const maxX = statusRect.left - 12;
+  return uniqueElements(
+    Array.from(row.querySelectorAll("div, span, p, td")).filter(isElementVisible2).filter((element) => !isForbiddenProductLinkTarget(element)).filter((element) => {
+      const text = getElementText(element);
+      if (!text || isStatusChipText(text)) return false;
+      if (!isReasonableTextTarget(text)) return false;
+      const rect = element.getBoundingClientRect();
+      if (!hasVerticalOverlap(rect, statusRect)) return false;
+      const centerX = getCenterX(rect);
+      return centerX >= minX && centerX <= maxX;
+    }).sort((a, b) => getElementText(b).length - getElementText(a).length)
+  ).slice(0, 6);
+}
+function collectRatingTargets(row, statusNode) {
+  const statusRect = statusNode.getBoundingClientRect();
+  const minX = statusRect.right + 12;
+  const maxX = statusRect.right + 180;
+  return uniqueElements(
+    Array.from(row.querySelectorAll("div, span, p, td")).filter(isElementVisible2).filter((element) => !isForbiddenProductLinkTarget(element)).filter((element) => {
+      const text = getElementText(element);
+      if (!text || isStatusChipText(text)) return false;
+      if (!looksLikeRatingText(text)) return false;
+      const rect = element.getBoundingClientRect();
+      if (!hasVerticalOverlap(rect, statusRect)) return false;
+      const centerX = getCenterX(rect);
+      return centerX >= minX && centerX <= maxX;
+    })
+  ).slice(0, 4);
+}
+function collectCenteredFallbackTargets(row, statusNode) {
+  const statusRect = statusNode.getBoundingClientRect();
+  const minX = statusRect.left - 360;
+  const maxX = statusRect.right + 180;
+  return uniqueElements(
+    Array.from(row.querySelectorAll("div, span, p, td")).filter(isElementVisible2).filter((element) => !isForbiddenProductLinkTarget(element)).filter((element) => {
+      const text = getElementText(element);
+      if (!text || isStatusChipText(text)) return false;
+      if (!isReasonableTextTarget(text)) return false;
+      const rect = element.getBoundingClientRect();
+      if (!hasVerticalOverlap(rect, statusRect)) return false;
+      const centerX = getCenterX(rect);
+      return centerX >= minX && centerX <= maxX;
+    }).sort((a, b) => {
+      const aDist = Math.abs(getCenterX(a.getBoundingClientRect()) - statusRect.left);
+      const bDist = Math.abs(getCenterX(b.getBoundingClientRect()) - statusRect.left);
+      return aDist - bDist;
+    })
+  ).slice(0, 4);
+}
+function collectCandidateClickTargets(row, statusNode) {
+  const reviewTargets = collectReviewTextTargets(row, statusNode);
+  const ratingTargets = collectRatingTargets(row, statusNode);
+  if (reviewTargets.length || ratingTargets.length) {
+    return uniqueElements([...reviewTargets, ...ratingTargets]).slice(0, 8);
+  }
+  return collectCenteredFallbackTargets(row, statusNode);
 }
 function extractCandidateTitle(row) {
-  const titledElements = Array.from(row.querySelectorAll("[title]"));
-  for (const element of titledElements) {
-    const title = normalizeText2(element.getAttribute("title"));
-    if (title && title !== "\u041D\u043E\u0432\u044B\u0439" && title !== "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" && title !== "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D") {
-      return title;
-    }
-  }
   const text = normalizeText2(row.innerText);
-  return truncate(text, 80) || "\u041E\u0442\u0437\u044B\u0432";
+  return truncate(text, 140) || "\u041E\u0442\u0437\u044B\u0432";
 }
 function getVisiblePendingCandidates() {
   const usedRows = /* @__PURE__ */ new Set();
@@ -1025,7 +1075,7 @@ function getVisiblePendingCandidates() {
     if (status !== "\u041D\u043E\u0432\u044B\u0439" && status !== "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D") continue;
     const row = findCandidateRowRootFromStatusNode(statusNode);
     if (!row || usedRows.has(row)) continue;
-    const clickTargets = collectCandidateClickTargets(row);
+    const clickTargets = collectCandidateClickTargets(row, statusNode);
     if (!clickTargets.length) continue;
     usedRows.add(row);
     candidates.push({
@@ -1035,13 +1085,14 @@ function getVisiblePendingCandidates() {
       status
     });
   }
-  return candidates;
+  return candidates.sort(
+    (a, b) => a.row.getBoundingClientRect().top - b.row.getBoundingClientRect().top
+  );
 }
 function pickNextCandidate() {
-  const candidates = getVisiblePendingCandidates().filter((candidate) => !triedTitlesInCycle.has(candidate.title));
+  const candidates = getVisiblePendingCandidates();
   if (!candidates.length) return null;
-  const poolSize = Math.min(candidates.length, 3);
-  return candidates[randomInt(0, poolSize - 1)] ?? candidates[0] ?? null;
+  return candidates[0] ?? null;
 }
 function getOpenReviewModal() {
   const cards = findReviewCards();
@@ -1100,7 +1151,6 @@ async function openCandidate(candidate) {
   if (hasModalOpen()) {
     throw new Error("\u041F\u0440\u0435\u0434\u044B\u0434\u0443\u0449\u0435\u0435 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u0435\u0449\u0451 \u043D\u0435 \u0437\u0430\u043A\u0440\u044B\u0442\u043E");
   }
-  triedTitlesInCycle.add(candidate.title);
   const usedTargets = /* @__PURE__ */ new Set();
   while (usedTargets.size < candidate.clickTargets.length) {
     const target = pickHumanClickTarget(candidate.clickTargets, usedTargets);
@@ -1140,6 +1190,10 @@ async function openCandidate(candidate) {
     return readyModal;
   }
   throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043E\u0442\u0437\u044B\u0432 \u043D\u0438 \u043F\u043E \u043E\u0434\u043D\u043E\u043C\u0443 \u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0443 \u0441\u0442\u0440\u043E\u043A\u0438");
+}
+function isCandidateHandled(candidate) {
+  if (!document.contains(candidate.row)) return true;
+  return getRowStatus(candidate.row) === "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D";
 }
 function findSendReplyButton(modal) {
   const textarea = modal.querySelector("#AnswerCommentForm");
@@ -1181,19 +1235,12 @@ function hasPostedSellerReply(modal, expectedReply) {
   const expectedSample = normalizeText2(expectedReply).slice(0, 80);
   return !expectedSample || blockText.includes(expectedSample);
 }
-function findCloseModalButton(modal) {
-  const exact = modal.parentElement?.querySelector("button.t7c80-a1.sc180-b5");
-  if (exact && isElementVisible2(exact)) {
-    return exact;
-  }
-  const allButtons = Array.from(
-    (modal.parentElement ?? document).querySelectorAll('button[type="button"]')
-  ).filter(isElementVisible2);
-  return allButtons.find((button) => {
-    const text = normalizeText2(button.innerText);
-    if (text) return false;
-    return button.querySelector("svg") !== null;
-  }) ?? null;
+function hasModalProcessedStatus(modal) {
+  const text = normalizeText2(modal.innerText);
+  return /Статус\s+Обработанн?ый/i.test(text) || text.includes("\u0421\u0442\u0430\u0442\u0443\u0441 \u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D");
+}
+function hasReplySubmissionCompleted(modal, expectedReply) {
+  return hasModalProcessedStatus(modal) || hasPostedSellerReply(modal, expectedReply);
 }
 function fireRealClick(target) {
   const common = { bubbles: true, cancelable: true, composed: true, view: window };
@@ -1247,49 +1294,58 @@ function fireRealClick(target) {
   }
 }
 function findModalBackdrop(modal) {
-  const root = modal.parentElement ?? modal;
-  const rightBackdrop = root.querySelector(".tc280-a1.tc280-a3") ?? root.querySelector(".tc280-a1.tc280-a2");
-  if (rightBackdrop && isElementVisible2(rightBackdrop)) {
-    return rightBackdrop;
+  const root = modal.parentElement ?? document.body;
+  const candidates = Array.from(root.querySelectorAll("div, section, aside")).filter(isElementVisible2).filter((element) => element !== modal && !element.contains(modal) && !modal.contains(element)).filter((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.width >= window.innerWidth * 0.85 && rect.height >= window.innerHeight * 0.85;
+  });
+  return candidates[0] ?? null;
+}
+function clickOutsideModalByPoint(modal) {
+  const rect = modal.getBoundingClientRect();
+  const points = [
+    {
+      x: Math.max(8, Math.floor(rect.left / 2)),
+      y: Math.max(8, Math.floor(rect.top + Math.min(rect.height / 2, 80)))
+    },
+    {
+      x: Math.min(window.innerWidth - 8, Math.floor(rect.right + (window.innerWidth - rect.right) / 2)),
+      y: Math.max(8, Math.floor(rect.top + Math.min(rect.height / 2, 80)))
+    },
+    {
+      x: Math.max(8, Math.floor(rect.left / 2)),
+      y: Math.max(8, Math.floor(rect.top / 2))
+    }
+  ];
+  for (const point of points) {
+    const target = document.elementFromPoint(point.x, point.y);
+    if (!target) continue;
+    if (modal.contains(target)) continue;
+    fireRealClick(target);
+    return true;
   }
-  return null;
+  return false;
 }
 async function closeOpenModalStrictly() {
   const modal = getOpenReviewModal();
   if (!modal) return;
-  const closeButton = findCloseModalButton(modal);
-  if (!closeButton) {
-    throw new Error("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u043A\u043D\u043E\u043F\u043A\u0430 \u0437\u0430\u043A\u0440\u044B\u0442\u0438\u044F \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u043E\u043A\u043D\u0430");
-  }
   setAutoStatus("\u0417\u0430\u043A\u0440\u044B\u0432\u0430\u044E \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E...");
-  fireRealClick(closeButton);
-  let closed = await waitUntil(() => !getOpenReviewModal(), 1500, 150);
-  if (closed) {
-    await sleep(1e3);
-    return;
-  }
-  const closeSvg = closeButton.querySelector("svg");
-  if (closeSvg) {
-    fireRealClick(closeSvg);
-    closed = await waitUntil(() => !getOpenReviewModal(), 1500, 150);
+  const backdrop = findModalBackdrop(modal);
+  if (backdrop) {
+    fireRealClick(backdrop);
+    const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
     if (closed) {
-      await sleep(1e3);
       return;
     }
   }
   const currentModal = getOpenReviewModal();
-  if (currentModal) {
-    const backdrop = findModalBackdrop(currentModal);
-    if (backdrop) {
-      fireRealClick(backdrop);
-      closed = await waitUntil(() => !getOpenReviewModal(), 2500, 150);
-      if (closed) {
-        await sleep(1e3);
-        return;
-      }
+  if (currentModal && clickOutsideModalByPoint(currentModal)) {
+    const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
+    if (closed) {
+      return;
     }
   }
-  throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0438 \u043F\u043E \u043A\u0440\u0435\u0441\u0442\u0438\u043A\u0443, \u043D\u0438 \u043F\u043E \u0444\u043E\u043D\u0443");
+  throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043A\u043B\u0438\u043A\u043E\u043C \u0432\u043D\u0435 \u043E\u043A\u043D\u0430");
 }
 async function recoverByReload(reason) {
   setAutoStatus(`${reason}. \u041F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u044E \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443...`, "warn");
@@ -1319,18 +1375,18 @@ async function processCandidate(candidate) {
   }
   setAutoStatus(`\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E \u043E\u0442\u0432\u0435\u0442: ${truncate(candidate.title, 50)}...`);
   await clickElement(sendButton);
-  await sleepRange(2e3, 3e3);
+  await sleep(1500);
   const replyAppeared = await waitUntil(() => {
     const currentModal = getOpenReviewModal();
     if (!currentModal) return false;
-    return hasPostedSellerReply(currentModal, insertedText);
-  }, 2e4, 2e3);
+    return hasReplySubmissionCompleted(currentModal, insertedText);
+  }, 2e4, 1e3);
   if (!replyAppeared) {
-    throw new Error("\u041F\u043E\u0441\u043B\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438 \u0432 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u043C \u043E\u043A\u043D\u0435 \u043D\u0435 \u043F\u043E\u044F\u0432\u0438\u043B\u0441\u044F \u043E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u043E\u0442\u0432\u0435\u0442");
+    throw new Error("\u041F\u043E\u0441\u043B\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438 \u043D\u0435 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u043B\u043E\u0441\u044C \u043F\u043E\u044F\u0432\u043B\u0435\u043D\u0438\u0435 \u043E\u0442\u0432\u0435\u0442\u0430 \u0432 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u043C \u043E\u043A\u043D\u0435");
   }
   setAutoStatus(`\u041E\u0442\u0432\u0435\u0442 \u043F\u043E\u044F\u0432\u0438\u043B\u0441\u044F: ${truncate(candidate.title, 50)}. \u0417\u0430\u043A\u0440\u044B\u0432\u0430\u044E \u043E\u043A\u043D\u043E...`, "success");
-  await sleep(1e3);
   await closeOpenModalStrictly();
+  await waitUntil(() => isCandidateHandled(candidate), 6e3, 350);
   return true;
 }
 async function startAutoMode() {
@@ -1371,7 +1427,7 @@ async function runAutoModeLoop() {
         if (!closed) {
           throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0435 \u0437\u0430\u043A\u0440\u044B\u043B\u043E\u0441\u044C \u0432\u043E\u0432\u0440\u0435\u043C\u044F");
         }
-        await sleep(1e3);
+        await sleep(250);
       }
       if (autoState.processedInBatch >= autoState.batchTarget) {
         await refreshWaitingFilter();
@@ -1391,7 +1447,7 @@ async function runAutoModeLoop() {
             `\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D\u043E ${autoState.totalProcessed}. \u0412 \u0442\u0435\u043A\u0443\u0449\u0435\u043C \u0446\u0438\u043A\u043B\u0435 ${autoState.processedInBatch}/${autoState.batchTarget}.`,
             "success"
           );
-          await sleep(1e3);
+          await sleep(350);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442\u0430";

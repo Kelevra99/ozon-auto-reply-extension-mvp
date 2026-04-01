@@ -669,7 +669,7 @@ function isForbiddenProductLinkTarget(element: HTMLElement): boolean {
 }
 
 function isReasonableTextTarget(text: string): boolean {
-  return text.length >= 10 && text.length <= 320;
+  return text.length >= 1 && text.length <= 320;
 }
 
 function collectReviewTextTargets(row: HTMLElement, statusNode: HTMLElement): HTMLElement[] {
@@ -786,11 +786,13 @@ function getVisiblePendingCandidates(): ReviewRowCandidate[] {
     });
   }
 
-  return candidates;
+  return candidates.sort(
+    (a, b) => a.row.getBoundingClientRect().top - b.row.getBoundingClientRect().top
+  );
 }
 
 function pickNextCandidate(): ReviewRowCandidate | null {
-  const candidates = getVisiblePendingCandidates().filter((candidate) => !triedTitlesInCycle.has(candidate.title));
+  const candidates = getVisiblePendingCandidates();
 
   if (!candidates.length) return null;
 
@@ -1198,8 +1200,6 @@ async function processCandidate(candidate: ReviewRowCandidate): Promise<boolean>
   setAutoStatus(`Ответ появился: ${truncate(candidate.title, 50)}. Закрываю окно...`, 'success');
 
   await closeOpenModalStrictly();
-  triedTitlesInCycle.add(candidate.title);
-
   await waitUntil(() => isCandidateHandled(candidate), 6000, 350);
 
   return true;

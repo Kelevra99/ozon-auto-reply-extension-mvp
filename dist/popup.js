@@ -18,6 +18,8 @@ var autoStartButton = document.getElementById("autoStartButton");
 var statusBox = document.getElementById("status");
 var currentEnabled = true;
 var currentBusy = false;
+var currentAutoActive = false;
+var autoPollTimer = null;
 async function sendMessage(message) {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) {
@@ -35,8 +37,13 @@ function updateEnabledLabel(enabled) {
 }
 function updateAutoStartAvailability() {
   const hasApiKey = apiKeyInput.value.trim().length > 0;
-  autoStartButton.disabled = currentBusy || !currentEnabled || !hasApiKey;
-  autoStartButton.className = hasApiKey && currentEnabled && !currentBusy ? "primary" : "ghost";
+  const canUse = !currentBusy && currentEnabled && (currentAutoActive || hasApiKey);
+  autoStartButton.disabled = !canUse;
+  if (currentAutoActive) {
+    autoStartButton.className = "danger";
+    return;
+  }
+  autoStartButton.className = canUse ? "primary" : "ghost";
 }
 function applyAvailability() {
   const disabled = currentBusy || !currentEnabled;
@@ -73,14 +80,21 @@ function applySettings(settings) {
   modeSelect.value = settings.mode || DEFAULT_SETTINGS.mode;
   applyAvailability();
 }
-async function persistSettings() {
+function applyAutoModeState(state) {
+  const active = Boolean(state?.requested || state?.running);
+  currentAutoActive = active;
+  autoStartButton.dataset.active = active ? "true" : "false";
+  autoStartButton.textContent = active ? "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442" : "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442";
+  updateAutoStartAvailability();
+}
+async function persistSettingsWithEnabled(enabled) {
   return sendMessage({
     type: "SAVE_SETTINGS",
     payload: {
       backendBaseUrl: BACKEND_BASE_URL,
       apiKey: apiKeyInput.value,
       mode: modeSelect.value,
-      enabled: enabledInput.checked
+      enabled
     }
   });
 }
@@ -89,15 +103,26 @@ async function loadSettings() {
   applySettings(settings);
   setStatus(describeEnabledState(settings.enabled));
 }
+async function loadAutoModeState(silent = false) {
+  try {
+    const state = await sendMessage({ type: "GET_AUTO_MODE_STATUS" });
+    applyAutoModeState(state);
+  } catch (error) {
+    if (!silent) {
+      setStatus(humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442\u0430."), "error");
+    }
+  }
+}
 async function saveSettings() {
   setBusy(true);
   try {
-    const settings = await persistSettings();
+    const settings = await persistSettingsWithEnabled(enabledInput.checked);
     applySettings(settings);
     setStatus(
       settings.enabled ? "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E." : "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.",
       "success"
     );
+    await loadAutoModeState(true);
   } catch (error) {
     setStatus(humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438."), "error");
   } finally {
@@ -107,17 +132,50 @@ async function saveSettings() {
 async function saveEnabledState() {
   setBusy(true);
   try {
+    const nextEnabled = enabledInput.checked;
+    if (!nextEnabled) {
+      try {
+        await sendMessage({
+          type: "POPUP_SET_AUTO_MODE",
+          payload: { enabled: false }
+        });
+      } catch {
+      }
+      applyAutoModeState({
+        available: false,
+        pageUrl: null,
+        requested: false,
+        running: false,
+        extensionEnabled: false,
+        statusText: "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.",
+        statusTone: "default"
+      });
+    }
     const settings = await sendMessage({
       type: "SAVE_SETTINGS",
-      payload: {
-        enabled: enabledInput.checked
-      }
+      payload: { enabled: nextEnabled }
     });
     applySettings(settings);
+    if (settings.enabled) {
+      await loadAutoModeState(true);
+    } else {
+      applyAutoModeState({
+        available: false,
+        pageUrl: null,
+        requested: false,
+        running: false,
+        extensionEnabled: false,
+        statusText: "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.",
+        statusTone: "default"
+      });
+    }
     setStatus(describeEnabledState(settings.enabled), "success");
   } catch (error) {
     enabledInput.checked = !enabledInput.checked;
-    setStatus(humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F."), "error");
+    setStatus(
+      humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F."),
+      "error"
+    );
   } finally {
     setBusy(false);
   }
@@ -125,7 +183,7 @@ async function saveEnabledState() {
 async function checkConnection() {
   setBusy(true);
   try {
-    const settings = await persistSettings();
+    const settings = await persistSettingsWithEnabled(enabledInput.checked);
     applySettings(settings);
     const data = await sendMessage({ type: "CHECK_CONNECTION" });
     if (!data.valid) {
@@ -143,6 +201,45 @@ async function checkConnection() {
     setBusy(false);
   }
 }
+async function toggleAutoMode() {
+  const shouldEnable = !currentAutoActive;
+  setBusy(true);
+  try {
+    if (shouldEnable) {
+      const settings = await persistSettingsWithEnabled(true);
+      applySettings(settings);
+      if (!settings.apiKey) {
+        throw new Error("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0432\u0435\u0434\u0438\u0442\u0435 API-\u043A\u043B\u044E\u0447, \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043D\u044B\u0439 \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 kairox.su.");
+      }
+    }
+    const state = await sendMessage({
+      type: "POPUP_SET_AUTO_MODE",
+      payload: { enabled: shouldEnable }
+    });
+    applyAutoModeState(state);
+    await loadSettings();
+    await loadAutoModeState(true);
+    setStatus(
+      shouldEnable ? "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F..." : "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.",
+      "success"
+    );
+  } catch (error) {
+    setStatus(
+      humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442\u0430."),
+      "error"
+    );
+  } finally {
+    setBusy(false);
+  }
+}
+function startAutoPolling() {
+  if (autoPollTimer !== null) {
+    window.clearInterval(autoPollTimer);
+  }
+  autoPollTimer = window.setInterval(() => {
+    void loadAutoModeState(true);
+  }, 1200);
+}
 enabledInput.addEventListener("change", () => {
   void saveEnabledState();
 });
@@ -155,5 +252,19 @@ saveButton.addEventListener("click", () => {
 checkButton.addEventListener("click", () => {
   void checkConnection();
 });
-void loadSettings();
+autoStartButton.addEventListener("click", () => {
+  void toggleAutoMode();
+});
+void (async () => {
+  try {
+    await loadSettings();
+    await loadAutoModeState(true);
+    startAutoPolling();
+  } catch (error) {
+    setStatus(
+      humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F."),
+      "error"
+    );
+  }
+})();
 //# sourceMappingURL=popup.js.map

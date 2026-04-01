@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Finerox — автоответы OZON",
+  "name": "Kairox — автоответы OZON",
   "version": "0.1.0",
   "description": "Расширение для генерации и вставки ответов на отзывы OZON.",
-  "permissions": ["storage"],
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
   "host_permissions": [
-    "https://api.finerox.online/*",
+    "https://api.kairox.su/*",
     "https://seller.ozon.ru/*",
     "https://*.seller.ozon.ru/*",
     "https://*.ozon.ru/*"
@@ -15,7 +18,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Finerox",
+    "default_title": "Kairox",
     "default_popup": "popup.html"
   },
   "content_scripts": [
@@ -25,7 +28,9 @@
         "https://*.seller.ozon.ru/*",
         "https://*.ozon.ru/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

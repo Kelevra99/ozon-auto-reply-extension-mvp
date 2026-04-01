@@ -644,62 +644,123 @@ function findCandidateRowRootFromStatusNode(statusNode: HTMLElement): HTMLElemen
   return null;
 }
 
+function isStatusChipText(text: string): boolean {
+  return text === 'Новый' || text === 'Просмотрен' || text === 'Обработан';
+}
+
 function looksLikeRatingText(text: string): boolean {
-  return /[1-5]/.test(text) || /оценк/i.test(text);
+  return /[1-5]/.test(text) || /★|звезд|оценк/i.test(text);
 }
 
-function scoreCandidateTarget(element: HTMLElement): number {
-  const text = normalizeText(element.innerText || element.textContent || element.getAttribute('title'));
-  let score = 0;
-
-  if (element.matches('a[href], button, [role="button"], [tabindex]')) score += 3;
-  if (text.length >= 16) score += 4;
-  if (text.length >= 40) score += 2;
-  if (looksLikeRatingText(text)) score += 3;
-  if (/отзыв|товар|комментар/i.test(text)) score += 2;
-
-  return score;
+function getElementText(element: HTMLElement): string {
+  return normalizeText(element.innerText || element.textContent || element.getAttribute('title'));
 }
 
-function collectCandidateClickTargets(row: HTMLElement): HTMLElement[] {
-  const directTargets = Array.from(
-    row.querySelectorAll<HTMLElement>('a[href], button, [role="button"], [tabindex], [title]')
-  )
-    .filter(isElementVisible)
-    .filter((element) => {
-      const text = normalizeText(element.innerText || element.textContent || element.getAttribute('title'));
-      if (!text) return false;
-      if (text === 'Новый' || text === 'Просмотрен' || text === 'Обработан') return false;
-      return text.length >= 3;
-    });
+function getCenterX(rect: DOMRect): number {
+  return rect.left + rect.width / 2;
+}
 
-  const textTargets = Array.from(row.querySelectorAll<HTMLElement>('div, span, p'))
-    .filter(isElementVisible)
-    .filter((element) => {
-      const text = normalizeText(element.innerText || element.textContent);
-      if (!text) return false;
-      if (text === 'Новый' || text === 'Просмотрен' || text === 'Обработан') return false;
-      if (text.length < 12 || text.length > 280) return false;
-      return true;
-    });
+function hasVerticalOverlap(rect: DOMRect, statusRect: DOMRect): boolean {
+  return rect.bottom >= statusRect.top - 24 && rect.top <= statusRect.bottom + 24;
+}
 
-  return uniqueElements([...directTargets, ...textTargets])
-    .sort((a, b) => scoreCandidateTarget(b) - scoreCandidateTarget(a))
-    .slice(0, 8);
+function isForbiddenProductLinkTarget(element: HTMLElement): boolean {
+  return Boolean(element.closest('a[href]'));
+}
+
+function isReasonableTextTarget(text: string): boolean {
+  return text.length >= 10 && text.length <= 320;
+}
+
+function collectReviewTextTargets(row: HTMLElement, statusNode: HTMLElement): HTMLElement[] {
+  const statusRect = statusNode.getBoundingClientRect();
+  const minX = statusRect.left - 360;
+  const maxX = statusRect.left - 12;
+
+  return uniqueElements(
+    Array.from(row.querySelectorAll<HTMLElement>('div, span, p, td'))
+      .filter(isElementVisible)
+      .filter((element) => !isForbiddenProductLinkTarget(element))
+      .filter((element) => {
+        const text = getElementText(element);
+        if (!text || isStatusChipText(text)) return false;
+        if (!isReasonableTextTarget(text)) return false;
+
+        const rect = element.getBoundingClientRect();
+        if (!hasVerticalOverlap(rect, statusRect)) return false;
+
+        const centerX = getCenterX(rect);
+        return centerX >= minX && centerX <= maxX;
+      })
+      .sort((a, b) => getElementText(b).length - getElementText(a).length)
+  ).slice(0, 6);
+}
+
+function collectRatingTargets(row: HTMLElement, statusNode: HTMLElement): HTMLElement[] {
+  const statusRect = statusNode.getBoundingClientRect();
+  const minX = statusRect.right + 12;
+  const maxX = statusRect.right + 180;
+
+  return uniqueElements(
+    Array.from(row.querySelectorAll<HTMLElement>('div, span, p, td'))
+      .filter(isElementVisible)
+      .filter((element) => !isForbiddenProductLinkTarget(element))
+      .filter((element) => {
+        const text = getElementText(element);
+        if (!text || isStatusChipText(text)) return false;
+        if (!looksLikeRatingText(text)) return false;
+
+        const rect = element.getBoundingClientRect();
+        if (!hasVerticalOverlap(rect, statusRect)) return false;
+
+        const centerX = getCenterX(rect);
+        return centerX >= minX && centerX <= maxX;
+      })
+  ).slice(0, 4);
+}
+
+function collectCenteredFallbackTargets(row: HTMLElement, statusNode: HTMLElement): HTMLElement[] {
+  const statusRect = statusNode.getBoundingClientRect();
+  const minX = statusRect.left - 360;
+  const maxX = statusRect.right + 180;
+
+  return uniqueElements(
+    Array.from(row.querySelectorAll<HTMLElement>('div, span, p, td'))
+      .filter(isElementVisible)
+      .filter((element) => !isForbiddenProductLinkTarget(element))
+      .filter((element) => {
+        const text = getElementText(element);
+        if (!text || isStatusChipText(text)) return false;
+        if (!isReasonableTextTarget(text)) return false;
+
+        const rect = element.getBoundingClientRect();
+        if (!hasVerticalOverlap(rect, statusRect)) return false;
+
+        const centerX = getCenterX(rect);
+        return centerX >= minX && centerX <= maxX;
+      })
+      .sort((a, b) => {
+        const aDist = Math.abs(getCenterX(a.getBoundingClientRect()) - statusRect.left);
+        const bDist = Math.abs(getCenterX(b.getBoundingClientRect()) - statusRect.left);
+        return aDist - bDist;
+      })
+  ).slice(0, 4);
+}
+
+function collectCandidateClickTargets(row: HTMLElement, statusNode: HTMLElement): HTMLElement[] {
+  const reviewTargets = collectReviewTextTargets(row, statusNode);
+  const ratingTargets = collectRatingTargets(row, statusNode);
+
+  if (reviewTargets.length || ratingTargets.length) {
+    return uniqueElements([...reviewTargets, ...ratingTargets]).slice(0, 8);
+  }
+
+  return collectCenteredFallbackTargets(row, statusNode);
 }
 
 function extractCandidateTitle(row: HTMLElement): string {
-  const titledElements = Array.from(row.querySelectorAll<HTMLElement>('[title]'));
-
-  for (const element of titledElements) {
-    const title = normalizeText(element.getAttribute('title'));
-    if (title && title !== 'Новый' && title !== 'Просмотрен' && title !== 'Обработан') {
-      return title;
-    }
-  }
-
   const text = normalizeText(row.innerText);
-  return truncate(text, 80) || 'Отзыв';
+  return truncate(text, 140) || 'Отзыв';
 }
 
 function getVisiblePendingCandidates(): ReviewRowCandidate[] {
@@ -713,7 +774,7 @@ function getVisiblePendingCandidates(): ReviewRowCandidate[] {
     const row = findCandidateRowRootFromStatusNode(statusNode);
     if (!row || usedRows.has(row)) continue;
 
-    const clickTargets = collectCandidateClickTargets(row);
+    const clickTargets = collectCandidateClickTargets(row, statusNode);
     if (!clickTargets.length) continue;
 
     usedRows.add(row);

@@ -948,47 +948,100 @@ async function refreshWaitingFilter() {
   autoState.refreshedWithoutWork = false;
   await sleepRange(1200, 2200);
 }
-function getRowStatus(row) {
-  const text = normalizeText2(row.innerText);
-  if (text.includes("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D")) return "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D";
-  if (text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D")) return "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D";
-  if (text.includes("\u041D\u043E\u0432\u044B\u0439")) return "\u041D\u043E\u0432\u044B\u0439";
-  return null;
+function uniqueElements(items) {
+  return Array.from(new Set(items));
 }
-function findCandidateRowRoot(titleNode) {
-  const directRow = titleNode.closest("tr");
-  if (directRow) return directRow;
-  let current = titleNode.parentElement;
+function getVisibleStatusNodes() {
+  return Array.from(document.querySelectorAll("div, span, td, p, a, button")).filter(isElementVisible2).filter((element) => {
+    const text = normalizeText2(element.innerText || element.textContent);
+    return text === "\u041D\u043E\u0432\u044B\u0439" || text === "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D";
+  });
+}
+function findCandidateRowRootFromStatusNode(statusNode) {
+  const structuralSelectors = ["tr", '[role="row"]', "li", "article"];
+  for (const selector of structuralSelectors) {
+    const row = statusNode.closest(selector);
+    if (row && isElementVisible2(row)) return row;
+  }
+  let current = statusNode;
   while (current && current !== document.body) {
     const text = normalizeText2(current.innerText);
-    if (text.includes("\u041D\u043E\u0432\u044B\u0439") || text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D") || text.includes("\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D")) {
+    const hasStatus = text.includes("\u041D\u043E\u0432\u044B\u0439") || text.includes("\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D");
+    const interactiveCount = current.querySelectorAll('a[href], button, [role="button"], [tabindex]').length;
+    if (hasStatus && interactiveCount >= 1 && text.length <= 2500) {
       return current;
     }
     current = current.parentElement;
   }
   return null;
 }
+function looksLikeRatingText(text) {
+  return /[1-5]/.test(text) || /оценк/i.test(text);
+}
+function scoreCandidateTarget(element) {
+  const text = normalizeText2(element.innerText || element.textContent || element.getAttribute("title"));
+  let score = 0;
+  if (element.matches('a[href], button, [role="button"], [tabindex]')) score += 3;
+  if (text.length >= 16) score += 4;
+  if (text.length >= 40) score += 2;
+  if (looksLikeRatingText(text)) score += 3;
+  if (/отзыв|товар|комментар/i.test(text)) score += 2;
+  return score;
+}
+function collectCandidateClickTargets(row) {
+  const directTargets = Array.from(
+    row.querySelectorAll('a[href], button, [role="button"], [tabindex], [title]')
+  ).filter(isElementVisible2).filter((element) => {
+    const text = normalizeText2(element.innerText || element.textContent || element.getAttribute("title"));
+    if (!text) return false;
+    if (text === "\u041D\u043E\u0432\u044B\u0439" || text === "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" || text === "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D") return false;
+    return text.length >= 3;
+  });
+  const textTargets = Array.from(row.querySelectorAll("div, span, p")).filter(isElementVisible2).filter((element) => {
+    const text = normalizeText2(element.innerText || element.textContent);
+    if (!text) return false;
+    if (text === "\u041D\u043E\u0432\u044B\u0439" || text === "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" || text === "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D") return false;
+    if (text.length < 12 || text.length > 280) return false;
+    return true;
+  });
+  return uniqueElements([...directTargets, ...textTargets]).sort((a, b) => scoreCandidateTarget(b) - scoreCandidateTarget(a)).slice(0, 8);
+}
+function extractCandidateTitle(row) {
+  const titledElements = Array.from(row.querySelectorAll("[title]"));
+  for (const element of titledElements) {
+    const title = normalizeText2(element.getAttribute("title"));
+    if (title && title !== "\u041D\u043E\u0432\u044B\u0439" && title !== "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D" && title !== "\u041E\u0431\u0440\u0430\u0431\u043E\u0442\u0430\u043D") {
+      return title;
+    }
+  }
+  const text = normalizeText2(row.innerText);
+  return truncate(text, 80) || "\u041E\u0442\u0437\u044B\u0432";
+}
 function getVisiblePendingCandidates() {
-  const titleNodes = Array.from(document.querySelectorAll("div.n1d-ba8[title]")).filter(isElementVisible2);
   const usedRows = /* @__PURE__ */ new Set();
   const candidates = [];
-  for (const titleNode of titleNodes) {
-    const row = findCandidateRowRoot(titleNode);
-    if (!row || usedRows.has(row)) continue;
-    const status = getRowStatus(row);
+  for (const statusNode of getVisibleStatusNodes()) {
+    const status = normalizeText2(statusNode.innerText);
     if (status !== "\u041D\u043E\u0432\u044B\u0439" && status !== "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D") continue;
-    const title = normalizeText2(titleNode.getAttribute("title") || titleNode.textContent);
-    if (!title) continue;
-    const clickTarget = titleNode.closest(".n1d-b8a") ?? titleNode;
-    if (!isElementVisible2(clickTarget)) continue;
+    const row = findCandidateRowRootFromStatusNode(statusNode);
+    if (!row || usedRows.has(row)) continue;
+    const clickTargets = collectCandidateClickTargets(row);
+    if (!clickTargets.length) continue;
     usedRows.add(row);
-    candidates.push({ row, clickTarget, title, status });
+    candidates.push({
+      row,
+      clickTargets,
+      title: extractCandidateTitle(row),
+      status
+    });
   }
   return candidates;
 }
 function pickNextCandidate() {
   const candidates = getVisiblePendingCandidates().filter((candidate) => !triedTitlesInCycle.has(candidate.title));
-  return candidates[0] ?? null;
+  if (!candidates.length) return null;
+  const poolSize = Math.min(candidates.length, 3);
+  return candidates[randomInt(0, poolSize - 1)] ?? candidates[0] ?? null;
 }
 function getOpenReviewModal() {
   const cards = findReviewCards();
@@ -1016,35 +1069,77 @@ function extractCommentTextFromModal(modal) {
   const match = raw.match(/Комментарий\s+(.+?)\s+Оценки/si);
   return normalizeText2(match?.[1] ?? null) || null;
 }
+function buildWeightedTargets(targets) {
+  const weighted = [];
+  for (const target of targets) {
+    const text = normalizeText2(target.innerText || target.textContent || target.getAttribute("title"));
+    if (text.length >= 20) {
+      weighted.push(target, target, target);
+      continue;
+    }
+    if (looksLikeRatingText(text)) {
+      weighted.push(target, target);
+      continue;
+    }
+    weighted.push(target);
+  }
+  return weighted;
+}
+function pickHumanClickTarget(targets, usedTargets) {
+  const available = targets.filter((target) => !usedTargets.has(target));
+  if (!available.length) return null;
+  const weighted = buildWeightedTargets(available);
+  return weighted[randomInt(0, weighted.length - 1)] ?? available[0] ?? null;
+}
+async function clickReviewTarget(target) {
+  target.scrollIntoView({ block: "center", behavior: "smooth" });
+  await sleepRange(180, 420);
+  fireRealClick(target);
+}
 async function openCandidate(candidate) {
   if (hasModalOpen()) {
     throw new Error("\u041F\u0440\u0435\u0434\u044B\u0434\u0443\u0449\u0435\u0435 \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u0435\u0449\u0451 \u043D\u0435 \u0437\u0430\u043A\u0440\u044B\u0442\u043E");
   }
-  setAutoStatus(`\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u044E \u043E\u0442\u0437\u044B\u0432: ${truncate(candidate.title, 56)}...`);
   triedTitlesInCycle.add(candidate.title);
-  await clickElement(candidate.clickTarget);
-  const opened = await waitUntil(() => Boolean(getOpenReviewModal()), 7e3, 120);
-  if (!opened) {
-    throw new Error("\u041D\u0435 \u043E\u0442\u043A\u0440\u044B\u043B\u043E\u0441\u044C \u043E\u043A\u043D\u043E \u043E\u0442\u0437\u044B\u0432\u0430");
+  const usedTargets = /* @__PURE__ */ new Set();
+  while (usedTargets.size < candidate.clickTargets.length) {
+    const target = pickHumanClickTarget(candidate.clickTargets, usedTargets);
+    if (!target) break;
+    usedTargets.add(target);
+    setAutoStatus(`\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u044E \u043E\u0442\u0437\u044B\u0432: ${truncate(candidate.title, 56)}...`);
+    await clickReviewTarget(target);
+    const opened = await waitUntil(() => Boolean(getOpenReviewModal()), 3200, 120);
+    if (!opened) {
+      await sleepRange(250, 600);
+      continue;
+    }
+    await sleepRange(1200, 2200);
+    const modal = getOpenReviewModal();
+    if (!modal) {
+      continue;
+    }
+    const ready = await waitUntil(() => {
+      const currentModal = getOpenReviewModal();
+      if (!currentModal) return false;
+      return isModalFullyLoaded(currentModal);
+    }, 5e3, 150);
+    if (!ready) {
+      const currentModal = getOpenReviewModal();
+      if (currentModal) {
+        try {
+          await closeOpenModalStrictly();
+        } catch {
+        }
+      }
+      continue;
+    }
+    const readyModal = getOpenReviewModal();
+    if (!readyModal) {
+      throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043F\u0440\u043E\u043F\u0430\u043B\u043E \u043F\u043E\u0441\u043B\u0435 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438");
+    }
+    return readyModal;
   }
-  await sleepRange(2e3, 3e3);
-  const modal = getOpenReviewModal();
-  if (!modal) {
-    throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u043F\u043E\u0441\u043B\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F");
-  }
-  const ready = await waitUntil(() => {
-    const currentModal = getOpenReviewModal();
-    if (!currentModal) return false;
-    return isModalFullyLoaded(currentModal);
-  }, 5e3, 150);
-  if (!ready) {
-    throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043E\u0442\u043A\u0440\u044B\u043B\u043E\u0441\u044C \u043D\u0435 \u043F\u043E\u043B\u043D\u043E\u0441\u0442\u044C\u044E");
-  }
-  const readyModal = getOpenReviewModal();
-  if (!readyModal) {
-    throw new Error("\u041C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043F\u0440\u043E\u043F\u0430\u043B\u043E \u043F\u043E\u0441\u043B\u0435 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438");
-  }
-  return readyModal;
+  throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043E\u0442\u0437\u044B\u0432 \u043D\u0438 \u043F\u043E \u043E\u0434\u043D\u043E\u043C\u0443 \u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0443 \u0441\u0442\u0440\u043E\u043A\u0438");
 }
 function findSendReplyButton(modal) {
   const textarea = modal.querySelector("#AnswerCommentForm");
@@ -1283,13 +1378,8 @@ async function runAutoModeLoop() {
       }
       const candidate = pickNextCandidate();
       if (!candidate) {
-        if (autoState.refreshedWithoutWork) {
-          await stopAutoMode("\u041F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0438\u0435 \u043E\u0442\u0437\u044B\u0432\u044B \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B.");
-          break;
-        }
-        autoState.refreshedWithoutWork = true;
-        await refreshWaitingFilter();
-        continue;
+        await stopAutoMode('\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u044B \u0432\u0438\u0434\u0438\u043C\u044B\u0435 \u043E\u0442\u0437\u044B\u0432\u044B \u0441\u043E \u0441\u0442\u0430\u0442\u0443\u0441\u043E\u043C "\u041D\u043E\u0432\u044B\u0439" \u0438\u043B\u0438 "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u043D".');
+        break;
       }
       autoState.refreshedWithoutWork = false;
       try {

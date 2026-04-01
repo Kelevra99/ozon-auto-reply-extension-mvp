@@ -8,7 +8,7 @@ import type {
 
 function ensureSettings(settings: ExtensionSettings) {
   if (!settings.apiKey) {
-    throw new Error('Укажите API-ключ, полученный на сайте finerox.online.');
+    throw new Error('Укажите API-ключ, полученный на сайте kairox.su.');
   }
 }
 
@@ -17,7 +17,7 @@ function getBaseUrl(settings: ExtensionSettings): string {
 }
 
 function debugLog(stage: string, payload: unknown) {
-  console.info(`[Finerox OZON Auto Reply] ${stage}`, payload);
+  console.info(`[Kairox OZON Auto Reply] ${stage}`, payload);
 }
 
 async function parseError(response: Response): Promise<string> {

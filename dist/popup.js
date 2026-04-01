@@ -9,11 +9,15 @@ var DEFAULT_SETTINGS = {
 
 // src/popup.ts
 var enabledInput = document.getElementById("enabled");
+var enabledStateLabel = document.getElementById("enabledStateLabel");
 var apiKeyInput = document.getElementById("apiKey");
 var modeSelect = document.getElementById("mode");
 var saveButton = document.getElementById("saveButton");
 var checkButton = document.getElementById("checkButton");
+var autoStartButton = document.getElementById("autoStartButton");
 var statusBox = document.getElementById("status");
+var currentEnabled = true;
+var currentBusy = false;
 async function sendMessage(message) {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) {
@@ -26,16 +30,33 @@ function setStatus(text, tone = "default") {
   statusBox.className = "status";
   if (tone !== "default") statusBox.classList.add(tone);
 }
+function updateEnabledLabel(enabled) {
+  enabledStateLabel.textContent = enabled ? "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E" : "\u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E";
+}
+function updateAutoStartAvailability() {
+  const hasApiKey = apiKeyInput.value.trim().length > 0;
+  autoStartButton.disabled = currentBusy || !currentEnabled || !hasApiKey;
+  autoStartButton.className = hasApiKey && currentEnabled && !currentBusy ? "primary" : "ghost";
+}
+function applyAvailability() {
+  const disabled = currentBusy || !currentEnabled;
+  apiKeyInput.disabled = disabled;
+  modeSelect.disabled = disabled;
+  saveButton.disabled = disabled;
+  checkButton.disabled = disabled;
+  enabledInput.disabled = currentBusy;
+  updateEnabledLabel(currentEnabled);
+  updateAutoStartAvailability();
+}
 function setBusy(busy) {
-  enabledInput.disabled = busy;
-  saveButton.disabled = busy;
-  checkButton.disabled = busy;
+  currentBusy = busy;
+  applyAvailability();
 }
 function humanizeError(error, fallback) {
   const message = error instanceof Error ? error.message : fallback;
   const normalized = message.toLowerCase();
   if (normalized.includes("401") || normalized.includes("403") || normalized.includes("unauthorized") || normalized.includes("forbidden") || normalized.includes("invalid") || normalized.includes("api key") || normalized.includes("api-\u043A\u043B\u044E\u0447")) {
-    return "API-\u043A\u043B\u044E\u0447 \u043D\u0435 \u043F\u043E\u0434\u043E\u0448\u0451\u043B. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 finerox.online.";
+    return "API-\u043A\u043B\u044E\u0447 \u043D\u0435 \u043F\u043E\u0434\u043E\u0448\u0451\u043B. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 kairox.su.";
   }
   if (normalized.includes("failed to fetch") || normalized.includes("networkerror") || normalized.includes("load failed")) {
     return "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0432\u044F\u0437\u0430\u0442\u044C\u0441\u044F \u0441 \u0441\u0435\u0440\u0432\u0438\u0441\u043E\u043C. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442 \u0438 \u043F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u043F\u043E\u043F\u044B\u0442\u043A\u0443.";
@@ -43,12 +64,14 @@ function humanizeError(error, fallback) {
   return message || fallback;
 }
 function describeEnabledState(enabled) {
-  return enabled ? "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E. \u041D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 OZON \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043A\u043D\u043E\u043F\u043A\u0438 Finerox." : "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E. Finerox \u043D\u0435 \u043C\u0435\u043D\u044F\u0435\u0442 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443 OZON.";
+  return enabled ? "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E." : "\u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.";
 }
 function applySettings(settings) {
+  currentEnabled = settings.enabled;
   enabledInput.checked = settings.enabled;
   apiKeyInput.value = settings.apiKey || "";
   modeSelect.value = settings.mode || DEFAULT_SETTINGS.mode;
+  applyAvailability();
 }
 async function persistSettings() {
   return sendMessage({
@@ -72,7 +95,7 @@ async function saveSettings() {
     const settings = await persistSettings();
     applySettings(settings);
     setStatus(
-      settings.enabled ? "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E." : "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.",
+      settings.enabled ? "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E." : "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.",
       "success"
     );
   } catch (error) {
@@ -122,6 +145,9 @@ async function checkConnection() {
 }
 enabledInput.addEventListener("change", () => {
   void saveEnabledState();
+});
+apiKeyInput.addEventListener("input", () => {
+  updateAutoStartAvailability();
 });
 saveButton.addEventListener("click", () => {
   void saveSettings();

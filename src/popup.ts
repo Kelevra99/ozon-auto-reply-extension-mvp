@@ -2,11 +2,16 @@ import { BACKEND_BASE_URL, DEFAULT_SETTINGS } from './storage';
 import type { BackgroundResponse, CheckAuthResponse, ExtensionSettings } from './types';
 
 const enabledInput = document.getElementById('enabled') as HTMLInputElement;
+const enabledStateLabel = document.getElementById('enabledStateLabel') as HTMLDivElement;
 const apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
 const modeSelect = document.getElementById('mode') as HTMLSelectElement;
 const saveButton = document.getElementById('saveButton') as HTMLButtonElement;
 const checkButton = document.getElementById('checkButton') as HTMLButtonElement;
+const autoStartButton = document.getElementById('autoStartButton') as HTMLButtonElement;
 const statusBox = document.getElementById('status') as HTMLDivElement;
+
+let currentEnabled = true;
+let currentBusy = false;
 
 async function sendMessage<T>(message: unknown): Promise<T> {
   const response = (await chrome.runtime.sendMessage(message)) as BackgroundResponse<T>;
@@ -22,10 +27,32 @@ function setStatus(text: string, tone: 'default' | 'success' | 'error' = 'defaul
   if (tone !== 'default') statusBox.classList.add(tone);
 }
 
+function updateEnabledLabel(enabled: boolean) {
+  enabledStateLabel.textContent = enabled ? 'Включено' : 'Выключено';
+}
+
+function updateAutoStartAvailability() {
+  const hasApiKey = apiKeyInput.value.trim().length > 0;
+  autoStartButton.disabled = currentBusy || !currentEnabled || !hasApiKey;
+  autoStartButton.className = hasApiKey && currentEnabled && !currentBusy ? 'primary' : 'ghost';
+}
+
+function applyAvailability() {
+  const disabled = currentBusy || !currentEnabled;
+
+  apiKeyInput.disabled = disabled;
+  modeSelect.disabled = disabled;
+  saveButton.disabled = disabled;
+  checkButton.disabled = disabled;
+  enabledInput.disabled = currentBusy;
+
+  updateEnabledLabel(currentEnabled);
+  updateAutoStartAvailability();
+}
+
 function setBusy(busy: boolean) {
-  enabledInput.disabled = busy;
-  saveButton.disabled = busy;
-  checkButton.disabled = busy;
+  currentBusy = busy;
+  applyAvailability();
 }
 
 function humanizeError(error: unknown, fallback: string): string {
@@ -41,7 +68,7 @@ function humanizeError(error: unknown, fallback: string): string {
     normalized.includes('api key') ||
     normalized.includes('api-ключ')
   ) {
-    return 'API-ключ не подошёл. Проверьте его на сайте finerox.online.';
+    return 'API-ключ не подошёл. Проверьте его на сайте kairox.su.';
   }
 
   if (
@@ -56,15 +83,15 @@ function humanizeError(error: unknown, fallback: string): string {
 }
 
 function describeEnabledState(enabled: boolean): string {
-  return enabled
-    ? 'Расширение включено. На странице OZON появятся кнопки Finerox.'
-    : 'Расширение выключено. Finerox не меняет страницу OZON.';
+  return enabled ? 'Включено.' : 'Выключено.';
 }
 
 function applySettings(settings: ExtensionSettings) {
+  currentEnabled = settings.enabled;
   enabledInput.checked = settings.enabled;
   apiKeyInput.value = settings.apiKey || '';
   modeSelect.value = settings.mode || DEFAULT_SETTINGS.mode;
+  applyAvailability();
 }
 
 async function persistSettings(): Promise<ExtensionSettings> {
@@ -92,8 +119,8 @@ async function saveSettings() {
     applySettings(settings);
     setStatus(
       settings.enabled
-        ? 'Настройки сохранены. Расширение включено.'
-        : 'Настройки сохранены. Расширение выключено.',
+        ? 'Настройки сохранены. Включено.'
+        : 'Настройки сохранены. Выключено.',
       'success'
     );
   } catch (error) {
@@ -150,6 +177,10 @@ async function checkConnection() {
 
 enabledInput.addEventListener('change', () => {
   void saveEnabledState();
+});
+
+apiKeyInput.addEventListener('input', () => {
+  updateAutoStartAvailability();
 });
 
 saveButton.addEventListener('click', () => {

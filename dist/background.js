@@ -1,14 +1,14 @@
 // src/api.ts
 function ensureSettings(settings) {
   if (!settings.apiKey) {
-    throw new Error("\u0423\u043A\u0430\u0436\u0438\u0442\u0435 API-\u043A\u043B\u044E\u0447, \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043D\u044B\u0439 \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 finerox.online.");
+    throw new Error("\u0423\u043A\u0430\u0436\u0438\u0442\u0435 API-\u043A\u043B\u044E\u0447, \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043D\u044B\u0439 \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 kairox.su.");
   }
 }
 function getBaseUrl(settings) {
   return settings.backendBaseUrl.replace(/\/+$/, "");
 }
 function debugLog(stage, payload) {
-  console.info(`[Finerox OZON Auto Reply] ${stage}`, payload);
+  console.info(`[Kairox OZON Auto Reply] ${stage}`, payload);
 }
 async function parseError(response) {
   try {

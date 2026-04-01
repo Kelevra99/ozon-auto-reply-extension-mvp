@@ -18,6 +18,7 @@ const modeSelect = document.getElementById('mode') as HTMLSelectElement;
 const saveButton = document.getElementById('saveButton') as HTMLButtonElement;
 const checkButton = document.getElementById('checkButton') as HTMLButtonElement;
 const autoStartButton = document.getElementById('autoStartButton') as HTMLButtonElement;
+const closeButton = document.getElementById('closeButton') as HTMLButtonElement | null;
 const statusBox = document.getElementById('status') as HTMLDivElement;
 
 let currentEnabled = true;
@@ -151,6 +152,17 @@ async function loadAutoModeState(silent = false) {
   try {
     const state = await sendMessage<AutoModeStatus>({ type: 'GET_AUTO_MODE_STATUS' });
     applyAutoModeState(state);
+
+    if (!currentBusy && state?.statusText) {
+      const tone =
+        state.statusTone === 'error'
+          ? 'error'
+          : state.statusTone === 'success'
+          ? 'success'
+          : 'default';
+
+      setStatus(state.statusText, tone);
+    }
   } catch (error) {
     if (!silent) {
       setStatus(humanizeError(error, 'Не удалось получить состояние автоответа.'), 'error');
@@ -327,6 +339,10 @@ checkButton.addEventListener('click', () => {
 
 autoStartButton.addEventListener('click', () => {
   void toggleAutoMode();
+});
+
+closeButton?.addEventListener('click', () => {
+  window.close();
 });
 
 void (async () => {

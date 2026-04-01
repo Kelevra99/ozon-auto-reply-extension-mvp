@@ -20,6 +20,28 @@
       }
       .wrap {
         padding: 14px;
+        position: relative;
+      }
+      .topbar {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 8px;
+      }
+      .close-btn {
+        border: 0;
+        background: transparent;
+        color: #64748b;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .close-btn:hover {
+        background: #e2e8f0;
+        color: #0f172a;
       }
       .card {
         background: #ffffff;
@@ -202,6 +224,9 @@
   </head>
   <body>
     <div class="wrap">
+      <div class="topbar">
+        <button id="closeButton" class="close-btn" type="button" aria-label="Закрыть">✕</button>
+      </div>
       <div class="card">
         <div class="brand">Kairox</div>
         <h1>Автоответы для OZON</h1>

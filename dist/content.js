@@ -1462,6 +1462,73 @@ async function initAutoMode() {
     void runAutoModeLoop();
   }, 1400);
 }
+function getAutoModeStatusSnapshot() {
+  return {
+    available: isReviewPage(),
+    pageUrl: location.href,
+    requested: autoState.enabled,
+    running: autoState.running,
+    extensionEnabled,
+    statusText: autoState.statusText,
+    statusTone: autoState.statusTone
+  };
+}
+chrome.runtime.onMessage.addListener(
+  (message, _sender, sendResponse) => {
+    if (!message || typeof message !== "object") {
+      return void 0;
+    }
+    if (message.type === "GET_AUTO_MODE_STATUS") {
+      sendResponse({ ok: true, data: getAutoModeStatusSnapshot() });
+      return true;
+    }
+    if (message.type === "START_AUTO_MODE_FROM_POPUP") {
+      void (async () => {
+        try {
+          if (!isReviewPage()) {
+            throw new Error("\u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443 \u043E\u0442\u0437\u044B\u0432\u043E\u0432 OZON.");
+          }
+          ensureAutoControls();
+          if (!extensionEnabled) {
+            await applyExtensionEnabledState(true);
+          }
+          await startAutoMode();
+          sendResponse({ ok: true, data: getAutoModeStatusSnapshot() });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442."
+          });
+        }
+      })();
+      return true;
+    }
+    if (message.type === "STOP_AUTO_MODE_FROM_POPUP") {
+      void (async () => {
+        try {
+          if (autoState.enabled || autoState.running) {
+            await stopAutoMode("\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D \u0438\u0437 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F.");
+          } else {
+            await setPersistentAutoModeEnabled(false);
+            autoState.enabled = false;
+            autoState.stopRequested = true;
+            autoState.running = false;
+            setAutoStatus("\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.");
+            updateAutoControls();
+          }
+          sendResponse({ ok: true, data: getAutoModeStatusSnapshot() });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442."
+          });
+        }
+      })();
+      return true;
+    }
+    return void 0;
+  }
+);
 async function init() {
   initObserver();
   try {
@@ -1473,11 +1540,35 @@ async function init() {
     runExtensionUiBoot();
   }
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !Object.prototype.hasOwnProperty.call(changes, "enabled")) {
+    if (areaName !== "local") {
       return;
     }
-    const nextValue = changes.enabled?.newValue;
-    void applyExtensionEnabledState(typeof nextValue === "boolean" ? nextValue : true);
+    if (Object.prototype.hasOwnProperty.call(changes, "enabled")) {
+      const nextValue = changes.enabled?.newValue;
+      void applyExtensionEnabledState(typeof nextValue === "boolean" ? nextValue : true);
+    }
+    if (!Object.prototype.hasOwnProperty.call(changes, AUTO_MODE_STORAGE_KEY)) {
+      return;
+    }
+    if (!isReviewPage()) {
+      return;
+    }
+    const nextAutoModeEnabled = Boolean(changes[AUTO_MODE_STORAGE_KEY]?.newValue);
+    if (nextAutoModeEnabled) {
+      if (extensionEnabled && !autoState.enabled && !autoState.running) {
+        void startAutoMode();
+      }
+      return;
+    }
+    if (autoState.enabled || autoState.running) {
+      void stopAutoMode("\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D \u0438\u0437 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F.");
+      return;
+    }
+    autoState.enabled = false;
+    autoState.stopRequested = true;
+    autoState.running = false;
+    setAutoStatus("\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.");
+    updateAutoControls();
   });
 }
 void init();

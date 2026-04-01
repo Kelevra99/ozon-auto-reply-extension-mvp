@@ -15,6 +15,7 @@ var modeSelect = document.getElementById("mode");
 var saveButton = document.getElementById("saveButton");
 var checkButton = document.getElementById("checkButton");
 var autoStartButton = document.getElementById("autoStartButton");
+var closeButton = document.getElementById("closeButton");
 var statusBox = document.getElementById("status");
 var currentEnabled = true;
 var currentBusy = false;
@@ -107,6 +108,10 @@ async function loadAutoModeState(silent = false) {
   try {
     const state = await sendMessage({ type: "GET_AUTO_MODE_STATUS" });
     applyAutoModeState(state);
+    if (!currentBusy && state?.statusText) {
+      const tone = state.statusTone === "error" ? "error" : state.statusTone === "success" ? "success" : "default";
+      setStatus(state.statusText, tone);
+    }
   } catch (error) {
     if (!silent) {
       setStatus(humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442\u0430."), "error");
@@ -254,6 +259,9 @@ checkButton.addEventListener("click", () => {
 });
 autoStartButton.addEventListener("click", () => {
   void toggleAutoMode();
+});
+closeButton?.addEventListener("click", () => {
+  window.close();
 });
 void (async () => {
   try {

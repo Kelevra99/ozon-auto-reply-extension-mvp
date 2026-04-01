@@ -83,7 +83,7 @@
         transition: 0.2s ease;
       }
       .slider::before {
-        content: '';
+        content: "";
         position: absolute;
         width: 22px;
         height: 22px;
@@ -142,6 +142,9 @@
         cursor: pointer;
         font-weight: 600;
         font-size: 14px;
+      }
+      #autoStartButton {
+        width: 100%;
       }
       button.primary {
         background: #2563eb;
@@ -202,7 +205,9 @@
       <div class="card">
         <div class="brand">Kairox</div>
         <h1>Автоответы для OZON</h1>
-        <div class="subtitle">Введите API-ключ, полученный на сайте kairox.su.</div>
+        <div class="subtitle">
+          Введите API-ключ, полученный на сайте kairox.su.
+        </div>
       </div>
 
       <div class="card">
@@ -218,7 +223,11 @@
       <div class="card">
         <div class="field">
           <label class="text-label" for="apiKey">API-ключ</label>
-          <input id="apiKey" type="password" placeholder="Вставьте API-ключ, полученный на сайте kairox.su" />
+          <input
+            id="apiKey"
+            type="password"
+            placeholder="Вставьте API-ключ, полученный на сайте kairox.su"
+          />
         </div>
 
         <div class="field">
@@ -237,14 +246,18 @@
       </div>
 
       <div class="card">
-        <button id="autoStartButton" class="ghost" disabled>Запустить автоответ</button>
+        <button id="autoStartButton" class="ghost" disabled>
+          Запустить автоответ
+        </button>
       </div>
 
       <div id="status" class="status">Загрузка настроек...</div>
 
       <div class="card footer">
         <span>Сервис подключается автоматически.</span>
-        <a href="https://kairox.su" target="_blank" rel="noreferrer">kairox.su</a>
+        <a href="https://kairox.su" target="_blank" rel="noreferrer"
+          >kairox.su</a
+        >
       </div>
     </div>
 

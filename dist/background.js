@@ -76,7 +76,7 @@ async function reportReplyResult(settings, payload) {
 }
 
 // src/storage.ts
-var BACKEND_BASE_URL = "https://api.finerox.online";
+var BACKEND_BASE_URL = "https://api.kairox.su";
 var DEFAULT_SETTINGS = {
   backendBaseUrl: BACKEND_BASE_URL,
   apiKey: "",

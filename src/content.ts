@@ -87,6 +87,92 @@ function runExtensionUiBoot() {
   window.setTimeout(() => ensureAutoControls(), 1000);
   void initAutoMode();
 }
+//печатный ввод текста
+function isTextField(
+  el: Element | null
+): el is HTMLInputElement | HTMLTextAreaElement {
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+}
+
+async function typeIntoFocusedField(
+  text: string,
+  charsPerSecond: number = 5,
+  clearBeforeStart: boolean = true
+): Promise<void> {
+  const el = document.activeElement;
+
+  if (!isTextField(el)) {
+    throw new Error('Фокус должен стоять на input или textarea');
+  }
+
+  if (clearBeforeStart) {
+    el.value = '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  const delay = 1000 / charsPerSecond;
+
+  for (const char of text) {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+
+    el.setRangeText(char, start, end, 'end');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, delay);
+    });
+  }
+}
+
+//рандомный клик по текстовому полю
+function clickRandomPointInsideInput(input: HTMLElement) { 
+  const rect = input.getBoundingClientRect();
+
+  if (rect.width < 20 || rect.height < 20) {
+    fireRealClick(input);
+    input.focus();
+    return;
+  }
+
+  const paddingX = Math.min(24, Math.max(8, rect.width * 0.08));
+  const paddingY = Math.min(16, Math.max(6, rect.height * 0.2));
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const x = Math.floor(
+      rect.left + paddingX + Math.random() * Math.max(1, rect.width - paddingX * 2)
+    );
+
+    const y = Math.floor(
+      rect.top + paddingY + Math.random() * Math.max(1, rect.height - paddingY * 2)
+    );
+
+    const target = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!target) continue;
+
+    if (target === input || input.contains(target)) {
+      fireRealClick(target);
+      input.focus();
+
+      if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+        const len = input.value.length;
+        input.setSelectionRange(len, len);
+      }
+
+      return;
+    }
+  }
+
+  fireRealClick(input);
+  input.focus();
+
+  if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+    const len = input.value.length;
+    input.setSelectionRange(len, len);
+  }
+}
+
+
 
 async function applyExtensionEnabledState(enabled: boolean) {
   extensionEnabled = enabled;
@@ -224,6 +310,13 @@ async function generateAndInsertForCard(card: HTMLElement, root: HTMLElement): P
     updateMeta(root, '');
 
     review = await extractReview(card);
+    const reviewLength = (review.reviewText ?? '').length; //длина отзыва по символам
+    const speedRead = Math.round(randomInt(15, 25)); // скорость "чтения" символов в секунду
+    const secondsToRead = (reviewLength / speedRead)*1000;
+    await sleepRange(secondsToRead, secondsToRead + 2000); // Имитируем человеческое время на прочтение отзыва
+    
+
+
 
     updateStatus(root, 'Генерация ответа...');
     const settings = await sendMessage<ExtensionSettings>({
@@ -248,8 +341,14 @@ async function generateAndInsertForCard(card: HTMLElement, root: HTMLElement): P
     if (!input) {
       throw new Error('Не найдено поле ответа');
     }
-
-    insertReplyIntoInput(input, result.generatedReply);
+    clickRandomPointInsideInput(input);
+    const replyLength = (result.generatedReply ?? '').length; // длина ответа по символам
+    const speedWrite = Math.round(randomInt(4, 7)); // скорость "печати" символов в секунду
+    const secondsToWrite = (replyLength / speedWrite) * 1000;
+    await sleepRange(300, 1000)
+    //await sleepRange(secondsToWrite, secondsToWrite + 2000); // Имитируем человеческое время на написание ответа
+    await typeIntoFocusedField(result.generatedReply, speedWrite, true);
+    //insertReplyIntoInput(input, result.generatedReply);
 
     updateStatus(root, 'Ответ вставлен', 'success');
     updateMeta(root, '');
@@ -954,11 +1053,12 @@ function pickHumanClickTarget(targets: HTMLElement[], usedTargets: Set<HTMLEleme
 
 async function clickReviewTarget(target: HTMLElement) {
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  await sleepRange(180, 420);
+  await sleepRange(960, 2400);
   fireRealClick(target);
 }
 
 async function openCandidate(candidate: ReviewRowCandidate): Promise<HTMLElement> {
+
   if (hasModalOpen()) {
     throw new Error('Предыдущее модальное окно ещё не закрыто');
   }
@@ -1238,7 +1338,7 @@ async function closeOpenModalStrictly() {
     const target = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
     if (!target) continue;
     if (modal.contains(target)) continue;
-
+    await sleepRange(400, 1500);
     fireRealClick(target);
 
     const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
@@ -1246,7 +1346,7 @@ async function closeOpenModalStrictly() {
       return;
     }
 
-    await sleep(120);
+    await sleepRange(400, 1500);
   }
 
   throw new Error('Не удалось закрыть модальное окно кликом вне окна');

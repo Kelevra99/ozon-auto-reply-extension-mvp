@@ -267,30 +267,6 @@ function findReplyInput(card) {
   }
   return null;
 }
-function setNativeValue(element, value) {
-  const prototype = Object.getPrototypeOf(element);
-  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
-  descriptor?.set?.call(element, value);
-}
-function insertReplyIntoInput(target, value) {
-  if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
-    setNativeValue(target, value);
-    target.dispatchEvent(new Event("input", { bubbles: true }));
-    target.dispatchEvent(new Event("change", { bubbles: true }));
-    target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "End" }));
-    target.focus();
-    return;
-  }
-  if (target.isContentEditable) {
-    target.focus();
-    document.execCommand("selectAll", false);
-    document.execCommand("insertText", false, value);
-    target.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
-    target.dispatchEvent(new Event("change", { bubbles: true }));
-    return;
-  }
-  throw new Error("\u041D\u0435\u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0439 \u0442\u0438\u043F \u043F\u043E\u043B\u044F \u043E\u0442\u0432\u0435\u0442\u0430");
-}
 function findAnswerSection(card) {
   const replyInput = findReplyInput(card);
   if (!replyInput) return null;
@@ -541,6 +517,64 @@ function runExtensionUiBoot() {
   window.setTimeout(() => ensureAutoControls(), 1e3);
   void initAutoMode();
 }
+function isTextField(el) {
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+}
+async function typeIntoFocusedField(text, charsPerSecond = 5, clearBeforeStart = true) {
+  const el = document.activeElement;
+  if (!isTextField(el)) {
+    throw new Error("\u0424\u043E\u043A\u0443\u0441 \u0434\u043E\u043B\u0436\u0435\u043D \u0441\u0442\u043E\u044F\u0442\u044C \u043D\u0430 input \u0438\u043B\u0438 textarea");
+  }
+  if (clearBeforeStart) {
+    el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  const delay = 1e3 / charsPerSecond;
+  for (const char of text) {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    el.setRangeText(char, start, end, "end");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolve) => {
+      setTimeout(resolve, delay);
+    });
+  }
+}
+function clickRandomPointInsideInput(input) {
+  const rect = input.getBoundingClientRect();
+  if (rect.width < 20 || rect.height < 20) {
+    fireRealClick(input);
+    input.focus();
+    return;
+  }
+  const paddingX = Math.min(24, Math.max(8, rect.width * 0.08));
+  const paddingY = Math.min(16, Math.max(6, rect.height * 0.2));
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const x = Math.floor(
+      rect.left + paddingX + Math.random() * Math.max(1, rect.width - paddingX * 2)
+    );
+    const y = Math.floor(
+      rect.top + paddingY + Math.random() * Math.max(1, rect.height - paddingY * 2)
+    );
+    const target = document.elementFromPoint(x, y);
+    if (!target) continue;
+    if (target === input || input.contains(target)) {
+      fireRealClick(target);
+      input.focus();
+      if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+        const len = input.value.length;
+        input.setSelectionRange(len, len);
+      }
+      return;
+    }
+  }
+  fireRealClick(input);
+  input.focus();
+  if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
+    const len = input.value.length;
+    input.setSelectionRange(len, len);
+  }
+}
 async function applyExtensionEnabledState(enabled) {
   extensionEnabled = enabled;
   if (!enabled) {
@@ -651,6 +685,10 @@ async function generateAndInsertForCard(card, root) {
     updateStatus(root, "\u0418\u0437\u0432\u043B\u0435\u0447\u0435\u043D\u0438\u0435 \u0434\u0430\u043D\u043D\u044B\u0445...");
     updateMeta(root, "");
     review = await extractReview(card);
+    const reviewLength = (review.reviewText ?? "").length;
+    const speedRead = Math.round(randomInt(15, 25));
+    const secondsToRead = reviewLength / speedRead * 1e3;
+    await sleepRange(secondsToRead, secondsToRead + 2e3);
     updateStatus(root, "\u0413\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u044F \u043E\u0442\u0432\u0435\u0442\u0430...");
     const settings = await sendMessage({
       type: "GET_SETTINGS"
@@ -671,7 +709,12 @@ async function generateAndInsertForCard(card, root) {
     if (!input) {
       throw new Error("\u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u043F\u043E\u043B\u0435 \u043E\u0442\u0432\u0435\u0442\u0430");
     }
-    insertReplyIntoInput(input, result.generatedReply);
+    clickRandomPointInsideInput(input);
+    const replyLength = (result.generatedReply ?? "").length;
+    const speedWrite = Math.round(randomInt(4, 7));
+    const secondsToWrite = replyLength / speedWrite * 1e3;
+    await sleepRange(300, 1e3);
+    await typeIntoFocusedField(result.generatedReply, speedWrite, true);
     updateStatus(root, "\u041E\u0442\u0432\u0435\u0442 \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D", "success");
     updateMeta(root, "");
     await reportResult({
@@ -1208,7 +1251,7 @@ function pickHumanClickTarget(targets, usedTargets) {
 }
 async function clickReviewTarget(target) {
   target.scrollIntoView({ block: "center", behavior: "smooth" });
-  await sleepRange(180, 420);
+  await sleepRange(960, 2400);
   fireRealClick(target);
 }
 async function openCandidate(candidate) {
@@ -1384,12 +1427,13 @@ async function closeOpenModalStrictly() {
     const target = document.elementFromPoint(point.x, point.y);
     if (!target) continue;
     if (modal.contains(target)) continue;
+    await sleepRange(400, 1500);
     fireRealClick(target);
     const closed = await waitUntil(() => !getOpenReviewModal(), 1800, 120);
     if (closed) {
       return;
     }
-    await sleep(120);
+    await sleepRange(400, 1500);
   }
   throw new Error("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043A\u0440\u044B\u0442\u044C \u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0435 \u043E\u043A\u043D\u043E \u043A\u043B\u0438\u043A\u043E\u043C \u0432\u043D\u0435 \u043E\u043A\u043D\u0430");
 }

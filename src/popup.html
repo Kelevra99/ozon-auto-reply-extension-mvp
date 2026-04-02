@@ -55,13 +55,16 @@
       .status + .card {
         margin-top: 12px;
       }
-      .brand {
-        margin: 0 0 4px;
-        font-size: 11px;
+      .brand-link {
+        display: inline-block;
+        margin: 0 0 6px;
+        font-size: 14px;
         font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
         color: #2563eb;
+        text-decoration: none;
+      }
+      .brand-link:hover {
+        text-decoration: underline;
       }
       h1 {
         margin: 0 0 6px;
@@ -195,6 +198,9 @@
         white-space: pre-wrap;
         color: #334155;
       }
+      .status:empty {
+        display: none;
+      }
       .status.success {
         border-color: #86efac;
         color: #166534;
@@ -228,11 +234,10 @@
         <button id="closeButton" class="close-btn" type="button" aria-label="Закрыть">✕</button>
       </div>
       <div class="card">
-        <div class="brand">SellerReply</div>
+        <a class="brand-link" href="https://sellerreply.ru" target="_blank" rel="noreferrer"
+          >SellerReply.ru</a
+        >
         <h1>Генерация ответов на отзывы</h1>
-        <div class="subtitle">
-          Введите API-ключ, полученный на сайте sellerreply.ru.
-        </div>
       </div>
 
       <div class="card">
@@ -278,12 +283,6 @@
 
       <div id="status" class="status">Загрузка настроек...</div>
 
-      <div class="card footer">
-        <span>Сервис подключается автоматически.</span>
-        <a href="https://sellerreply.ru" target="_blank" rel="noreferrer"
-          >sellerreply.ru</a
-        >
-      </div>
     </div>
 
     <script type="module" src="./popup.js"></script>

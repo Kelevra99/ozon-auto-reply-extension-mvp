@@ -71,9 +71,6 @@ function humanizeError(error, fallback) {
   }
   return message || fallback;
 }
-function describeEnabledState(enabled) {
-  return enabled ? "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E." : "\u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.";
-}
 function applySettings(settings) {
   currentEnabled = settings.enabled;
   enabledInput.checked = settings.enabled;
@@ -87,6 +84,22 @@ function applyAutoModeState(state) {
   autoStartButton.dataset.active = active ? "true" : "false";
   autoStartButton.textContent = active ? "\u041E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442" : "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442";
   updateAutoStartAvailability();
+}
+function getAutoStatusTone(state) {
+  return state.statusTone === "error" ? "error" : state.statusTone === "success" ? "success" : "default";
+}
+function shouldRenderAutoStatus(state) {
+  if (!state?.statusText) return false;
+  const passiveStatuses = /* @__PURE__ */ new Set([
+    "\u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D.",
+    "\u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.",
+    "\u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
+    "\u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D \u0438\u0437 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F.",
+    "\u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F...",
+    "\u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0437\u0430\u043F\u0443\u0449\u0435\u043D.",
+    "\u0432\u043E\u0441\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u044E \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043F\u043E\u0441\u043B\u0435 \u043F\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438..."
+  ]);
+  return !passiveStatuses.has(state.statusText.trim().toLowerCase());
 }
 async function persistSettingsWithEnabled(enabled) {
   return sendMessage({
@@ -102,15 +115,14 @@ async function persistSettingsWithEnabled(enabled) {
 async function loadSettings() {
   const settings = await sendMessage({ type: "GET_SETTINGS" });
   applySettings(settings);
-  setStatus(describeEnabledState(settings.enabled));
+  setStatus("");
 }
 async function loadAutoModeState(silent = false) {
   try {
     const state = await sendMessage({ type: "GET_AUTO_MODE_STATUS" });
     applyAutoModeState(state);
-    if (!currentBusy && state?.statusText) {
-      const tone = state.statusTone === "error" ? "error" : state.statusTone === "success" ? "success" : "default";
-      setStatus(state.statusText, tone);
+    if (!currentBusy && shouldRenderAutoStatus(state)) {
+      setStatus(state.statusText, getAutoStatusTone(state));
     }
   } catch (error) {
     if (!silent) {
@@ -123,10 +135,7 @@ async function saveSettings() {
   try {
     const settings = await persistSettingsWithEnabled(enabledInput.checked);
     applySettings(settings);
-    setStatus(
-      settings.enabled ? "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E." : "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B. \u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E.",
-      "success"
-    );
+    setStatus("\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B.", "success");
     await loadAutoModeState(true);
   } catch (error) {
     setStatus(humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438."), "error");
@@ -174,7 +183,7 @@ async function saveEnabledState() {
         statusTone: "default"
       });
     }
-    setStatus(describeEnabledState(settings.enabled), "success");
+    setStatus("");
   } catch (error) {
     enabledInput.checked = !enabledInput.checked;
     setStatus(
@@ -224,10 +233,11 @@ async function toggleAutoMode() {
     applyAutoModeState(state);
     await loadSettings();
     await loadAutoModeState(true);
-    setStatus(
-      shouldEnable ? "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F..." : "\u0410\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.",
-      "success"
-    );
+    if (shouldRenderAutoStatus(state)) {
+      setStatus(state.statusText, getAutoStatusTone(state));
+    } else {
+      setStatus("");
+    }
   } catch (error) {
     setStatus(
       humanizeError(error, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0430\u0432\u0442\u043E\u043E\u0442\u0432\u0435\u0442\u0430."),

@@ -106,10 +106,6 @@ function humanizeError(error: unknown, fallback: string): string {
   return message || fallback;
 }
 
-function describeEnabledState(enabled: boolean): string {
-  return enabled ? 'Включено.' : 'Выключено.';
-}
-
 function applySettings(settings: ExtensionSettings) {
   currentEnabled = settings.enabled;
   enabledInput.checked = settings.enabled;
@@ -130,6 +126,30 @@ function applyAutoModeState(state: AutoModeStatus | null | undefined) {
   updateAutoStartAvailability();
 }
 
+function getAutoStatusTone(state: AutoModeStatus): 'default' | 'success' | 'error' {
+  return state.statusTone === 'error'
+    ? 'error'
+    : state.statusTone === 'success'
+    ? 'success'
+    : 'default';
+}
+
+function shouldRenderAutoStatus(state: AutoModeStatus | null | undefined): state is AutoModeStatus {
+  if (!state?.statusText) return false;
+
+  const passiveStatuses = new Set([
+    'автоответ выключен.',
+    'автоответ остановлен.',
+    'автоответ остановлен вручную.',
+    'автоответ остановлен из расширения.',
+    'автоответ запускается...',
+    'автоответ запущен.',
+    'восстанавливаю автоответ после перезагрузки...'
+  ]);
+
+  return !passiveStatuses.has(state.statusText.trim().toLowerCase());
+}
+
 async function persistSettingsWithEnabled(enabled: boolean): Promise<ExtensionSettings> {
   return sendMessage<ExtensionSettings>({
     type: 'SAVE_SETTINGS',
@@ -145,7 +165,7 @@ async function persistSettingsWithEnabled(enabled: boolean): Promise<ExtensionSe
 async function loadSettings() {
   const settings = await sendMessage<ExtensionSettings>({ type: 'GET_SETTINGS' });
   applySettings(settings);
-  setStatus(describeEnabledState(settings.enabled));
+  setStatus('');
 }
 
 async function loadAutoModeState(silent = false) {
@@ -153,15 +173,8 @@ async function loadAutoModeState(silent = false) {
     const state = await sendMessage<AutoModeStatus>({ type: 'GET_AUTO_MODE_STATUS' });
     applyAutoModeState(state);
 
-    if (!currentBusy && state?.statusText) {
-      const tone =
-        state.statusTone === 'error'
-          ? 'error'
-          : state.statusTone === 'success'
-          ? 'success'
-          : 'default';
-
-      setStatus(state.statusText, tone);
+    if (!currentBusy && shouldRenderAutoStatus(state)) {
+      setStatus(state.statusText, getAutoStatusTone(state));
     }
   } catch (error) {
     if (!silent) {
@@ -175,12 +188,7 @@ async function saveSettings() {
   try {
     const settings = await persistSettingsWithEnabled(enabledInput.checked);
     applySettings(settings);
-    setStatus(
-      settings.enabled
-        ? 'Настройки сохранены. Включено.'
-        : 'Настройки сохранены. Выключено.',
-      'success'
-    );
+    setStatus('Настройки сохранены.', 'success');
     await loadAutoModeState(true);
   } catch (error) {
     setStatus(humanizeError(error, 'Не удалось сохранить настройки.'), 'error');
@@ -236,7 +244,7 @@ async function saveEnabledState() {
       });
     }
 
-    setStatus(describeEnabledState(settings.enabled), 'success');
+    setStatus('');
   } catch (error) {
     enabledInput.checked = !enabledInput.checked;
     setStatus(
@@ -297,10 +305,11 @@ async function toggleAutoMode() {
     await loadSettings();
     await loadAutoModeState(true);
 
-    setStatus(
-      shouldEnable ? 'Автоответ запускается...' : 'Автоответ остановлен.',
-      'success'
-    );
+    if (shouldRenderAutoStatus(state)) {
+      setStatus(state.statusText, getAutoStatusTone(state));
+    } else {
+      setStatus('');
+    }
   } catch (error) {
     setStatus(
       humanizeError(error, 'Не удалось изменить состояние автоответа.'),

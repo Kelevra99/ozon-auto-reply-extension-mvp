@@ -517,28 +517,114 @@ function runExtensionUiBoot() {
   window.setTimeout(() => ensureAutoControls(), 1e3);
   void initAutoMode();
 }
-function isTextField(el) {
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
-}
-async function typeIntoFocusedField(text, charsPerSecond = 5, clearBeforeStart = true) {
-  const el = document.activeElement;
-  if (!isTextField(el)) {
+async function simulateHumanTypingIntoFocusedField(text, clearBeforeStart = true) {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement) && !(active instanceof HTMLTextAreaElement)) {
     throw new Error("\u0424\u043E\u043A\u0443\u0441 \u0434\u043E\u043B\u0436\u0435\u043D \u0441\u0442\u043E\u044F\u0442\u044C \u043D\u0430 input \u0438\u043B\u0438 textarea");
   }
-  if (clearBeforeStart) {
-    el.value = "";
+  const el = active;
+  const rand = (min, max) => Math.random() * (max - min) + min;
+  const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const chance = (value) => Math.random() < value;
+  const wait = async (ms) => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  };
+  const isLetter = (char) => /^[a-zа-яё]$/i.test(char);
+  const isPunctuation = (char) => /[.,!?;:]/.test(char);
+  const fireInputEvent = () => {
     el.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-  const delay = 1e3 / charsPerSecond;
-  for (const char of text) {
+  };
+  const insertText = (value) => {
     const start = el.selectionStart ?? el.value.length;
     const end = el.selectionEnd ?? el.value.length;
-    el.setRangeText(char, start, end, "end");
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((resolve) => {
-      setTimeout(resolve, delay);
-    });
+    el.setRangeText(value, start, end, "end");
+    fireInputEvent();
+  };
+  const backspaceOneChar = () => {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    if (start !== end) {
+      el.setRangeText("", start, end, "end");
+      fireInputEvent();
+      return;
+    }
+    if (start > 0) {
+      el.setRangeText("", start - 1, start, "end");
+      fireInputEvent();
+    }
+  };
+  const getRandomWrongChar = (correctChar) => {
+    const ru = "\u0439\u0446\u0443\u043A\u0435\u043D\u0433\u0448\u0449\u0437\u0445\u044A\u0444\u044B\u0432\u0430\u043F\u0440\u043E\u043B\u0434\u0436\u044D\u044F\u0447\u0441\u043C\u0438\u0442\u044C\u0431\u044E";
+    const en = "\u041B\u041E\u0428\u0429\u042B\u0429\u0412\u0428\u043B\u0442\u043C\u0442\u0449\u0447\u0441\u0442\u0449\u0448\u0422\u0429\u0428\u0422\u0429\u0442\u0449\u0432\u043C\u0442\u0449\u044B\u043E\u0430\u0442\u043C\u044F\u0442\u044B\u0432\u0449\u0430";
+    const isUpperCase = correctChar === correctChar.toUpperCase();
+    const lower = correctChar.toLowerCase();
+    const alphabet = /^[a-z]$/i.test(correctChar) ? en : ru;
+    let wrong = lower;
+    while (wrong === lower) {
+      wrong = alphabet[randInt(0, alphabet.length - 1)];
+    }
+    return isUpperCase ? wrong.toUpperCase() : wrong;
+  };
+  const runConfig = {
+    charsPerSecond: rand(4, 7),
+    clearBeforeStart,
+    typoChance: rand(0.02, 0.05),
+    minTypoLength: 1,
+    maxTypoLength: 2,
+    punctuationPauseBeforeMs: randInt(100, 400),
+    punctuationPauseAfterMs: randInt(150, 1e3),
+    wordPauseChance: rand(0.15, 0.25),
+    wordPauseMs: randInt(50, 100)
+  };
+  if (runConfig.clearBeforeStart) {
+    el.value = "";
+    fireInputEvent();
   }
+  const baseDelay = 1e3 / runConfig.charsPerSecond;
+  for (let i = 0; i < text.length; i++) {
+    const currentChar = text[i];
+    if (isPunctuation(currentChar)) {
+      await wait(
+        baseDelay * rand(0.85, 1.2) + runConfig.punctuationPauseBeforeMs
+      );
+    } else {
+      await wait(baseDelay * rand(0.85, 1.2));
+    }
+    const canMakeTypo = isLetter(currentChar) && chance(runConfig.typoChance) && i < text.length - 1;
+    if (canMakeTypo) {
+      const typoLength = randInt(
+        runConfig.minTypoLength,
+        runConfig.maxTypoLength
+      );
+      let insertedTypoChars = 0;
+      for (let t = 0; t < typoLength; t++) {
+        const index = i + t;
+        if (index >= text.length) break;
+        const targetChar = text[index];
+        if (!isLetter(targetChar)) break;
+        insertText(getRandomWrongChar(targetChar));
+        insertedTypoChars++;
+        await wait(baseDelay * rand(0.7, 1.1));
+      }
+      if (insertedTypoChars > 0) {
+        await wait(randInt(120, 260));
+        for (let b = 0; b < insertedTypoChars; b++) {
+          backspaceOneChar();
+          await wait(randInt(50, 110));
+        }
+      }
+    }
+    insertText(currentChar);
+    if (isPunctuation(currentChar)) {
+      await wait(runConfig.punctuationPauseAfterMs + randInt(20, 90));
+    }
+    if (currentChar === " " && chance(runConfig.wordPauseChance)) {
+      await wait(runConfig.wordPauseMs + randInt(20, 80));
+    }
+  }
+  return runConfig;
 }
 function clickRandomPointInsideInput(input) {
   const rect = input.getBoundingClientRect();
@@ -714,7 +800,7 @@ async function generateAndInsertForCard(card, root) {
     const speedWrite = Math.round(randomInt(4, 7));
     const secondsToWrite = replyLength / speedWrite * 1e3;
     await sleepRange(300, 1e3);
-    await typeIntoFocusedField(result.generatedReply, speedWrite, true);
+    const usedConfig = await simulateHumanTypingIntoFocusedField(result.generatedReply);
     updateStatus(root, "\u041E\u0442\u0432\u0435\u0442 \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D", "success");
     updateMeta(root, "");
     await reportResult({

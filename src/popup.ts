@@ -92,7 +92,7 @@ function humanizeError(error: unknown, fallback: string): string {
     normalized.includes('api key') ||
     normalized.includes('api-ключ')
   ) {
-    return 'API-ключ не подошёл. Проверьте его на сайте kairox.su.';
+    return 'API-ключ не подошёл. Проверьте его на сайте sellerreply.ru.';
   }
 
   if (
@@ -284,7 +284,7 @@ async function toggleAutoMode() {
       applySettings(settings);
 
       if (!settings.apiKey) {
-        throw new Error('Сначала введите API-ключ, полученный на сайте kairox.su.');
+        throw new Error('Сначала введите API-ключ, полученный на сайте sellerreply.ru.');
       }
     }
 

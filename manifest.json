@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Kairox — автоответы OZON",
+  "name": "SellerReply — генерация ответов на отзывы",
   "version": "0.1.0",
-  "description": "Расширение для генерации и вставки ответов на отзывы OZON.",
+  "description": "Расширение для генерации и вставки ответов на отзывы.",
   "permissions": [
     "storage",
     "tabs"
@@ -18,7 +18,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Kairox",
+    "default_title": "SellerReply",
     "default_popup": "popup.html"
   },
   "content_scripts": [

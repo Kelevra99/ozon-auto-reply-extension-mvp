@@ -8,7 +8,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://api.kairox.su/*",
+    "https://api.sellerreply.ru/*",
     "https://seller.ozon.ru/*",
     "https://*.seller.ozon.ru/*",
     "https://*.ozon.ru/*"

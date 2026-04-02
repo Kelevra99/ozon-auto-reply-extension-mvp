@@ -1,5 +1,5 @@
 // src/storage.ts
-var BACKEND_BASE_URL = "https://api.kairox.su";
+var BACKEND_BASE_URL = "https://api.sellerreply.ru";
 var DEFAULT_SETTINGS = {
   backendBaseUrl: BACKEND_BASE_URL,
   apiKey: "",
